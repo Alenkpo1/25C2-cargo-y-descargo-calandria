@@ -23,49 +23,57 @@ pub fn perform_connectivity_check(
     let remote_ip = IpAddr::from_str(&pair.remote_candidate.address)?;
     let remote_addr = SocketAddr::new(remote_ip, pair.remote_candidate.port as u16);
 
-    let (request, transaction_id) = StunMessage::create_binding_request_with_transaction();
-    socket.send_to(&request, remote_addr)?;
-    socket.set_read_timeout(Some(Duration::from_millis(500)))?;
+    // Retry up to 3 times with increasing timeout
+    for attempt in 0..3 {
+        let timeout_ms = 500 + (attempt * 500); // 500ms, 1000ms, 1500ms
+        
+        let (request, transaction_id) = StunMessage::create_binding_request_with_transaction();
+        socket.send_to(&request, remote_addr)?;
+        socket.set_read_timeout(Some(Duration::from_millis(timeout_ms)))?;
 
-    let mut buf = [0u8; 1024];
-    loop {
-        match socket.recv_from(&mut buf) {
-            Ok((len, addr)) => {
-                if addr.ip() != remote_addr.ip() {
-                    continue;
-                }
-
-                match StunMessage::parse(&buf[..len]) {
-                    Ok(response) => match response.message_type {
-                        MessageType::BindingResponse => {
-                            if response.transaction_id == transaction_id {
-                                socket.set_read_timeout(None)?;
-                                return Ok(true);
+        let mut buf = [0u8; 1024];
+        let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+        
+        while std::time::Instant::now() < deadline {
+            match socket.recv_from(&mut buf) {
+                Ok((len, addr)) => {
+                    // Process any STUN message
+                    match StunMessage::parse(&buf[..len]) {
+                        Ok(response) => match response.message_type {
+                            MessageType::BindingResponse => {
+                                if response.transaction_id == transaction_id {
+                                    socket.set_read_timeout(None)?;
+                                    return Ok(true);
+                                }
                             }
-                        }
-                        MessageType::BindingRequest => {
-                            let reply = StunMessage::create_binding_success(
-                                response.transaction_id,
-                                addr,
-                            );
-                            let _ = socket.send_to(&reply, addr);
-                        }
-                        _ => {}
-                    },
-                    Err(_) => continue,
+                            MessageType::BindingRequest => {
+                                // Respond to incoming binding requests (important for both peers)
+                                let reply = StunMessage::create_binding_success(
+                                    response.transaction_id,
+                                    addr,
+                                );
+                                let _ = socket.send_to(&reply, addr);
+                            }
+                            _ => {}
+                        },
+                        Err(_) => continue,
+                    }
                 }
-            }
-            Err(err) => {
-                socket.set_read_timeout(None)?;
-                if err.kind() == std::io::ErrorKind::TimedOut
-                    || err.kind() == std::io::ErrorKind::WouldBlock
-                {
-                    return Ok(false);
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::TimedOut
+                        || err.kind() == std::io::ErrorKind::WouldBlock
+                    {
+                        break; // Try next attempt
+                    }
+                    socket.set_read_timeout(None)?;
+                    return Err(Box::new(err));
                 }
-                return Err(Box::new(err));
             }
         }
     }
+    
+    socket.set_read_timeout(None)?;
+    Ok(false)
 }
 
 /// Sort candidate pairs by priority in descending order.

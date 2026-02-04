@@ -1,1 +1,30 @@
 [INFO][1770234511] Servidor iniciado en 127.0.0.1:8443 con archivo de usuarios users.txt
+[INFO][1770242807] Usuarios cargados desde users.txt
+[INFO][1770242807] Servidor iniciado en 127.0.0.1:8443 con archivo de usuarios users.txt
+[ERROR][1770242841] Error de login: User does not exist
+[ERROR][1770242842] Error de login: User does not exist
+[INFO][1770242843] User registration sent
+[INFO][1770242843] Nuevo usuario registrado en el archivo de usuarios
+[INFO][1770242843] Registro de usuario exitoso
+[INFO][1770242843] Estado de alen -> AVAILABLE
+[INFO][1770242843] alen inició sesión
+[INFO][1770242843] Successful login to signaling server
+[INFO][1770242963] Usuario cerró sesión desde lobby
+[INFO][1770242963] Estado de alen -> DISCONNECTED
+[INFO][1770242963] alen cerró sesión
+[INFO][1770242963] Estado de alen -> DISCONNECTED
+[WARN][1770242963] alen se desconectó
+[INFO][1770242990] Estado de alen -> AVAILABLE
+[INFO][1770242990] alen inició sesión
+[INFO][1770242990] Successful login to signaling server
+[ERROR][1770243307] Error de señalización: Connection close: unexpected end of file
+[INFO][1770243312] Usuarios cargados desde users.txt
+[INFO][1770243312] Servidor iniciado en 127.0.0.1:8443 con archivo de usuarios users.txt
+[INFO][1770243866] Successful login to signaling server
+[INFO][1770244596] Successful login to signaling server
+[INFO][1770244919] Llamada entrante recibida
+[INFO][1770245280] Llamada finalizada
+[ERROR][1770245301] Error de señalización: Connection close: unexpected end of file
+[INFO][1770245307] Usuario cerró sesión desde lobby
+[INFO][1770245307] Successful login to signaling server
+[INFO][1770245330] Llamada entrante recibida

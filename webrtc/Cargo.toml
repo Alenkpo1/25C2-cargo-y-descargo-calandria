@@ -1,0 +1,17 @@
+[package]
+name = "room-rtc"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+opencv = "0.96.0"
+openh264 = "0.9.0"
+rand = "0.8"
+openssl = { version = "0.10.64", features = ["vendored"] }
+hex = "0.4"
+udp-dtls = "0.1.0"
+
+[lib]
+name = "room_rtc"
+path = "src/lib.rs"

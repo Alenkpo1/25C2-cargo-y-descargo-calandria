@@ -47,3 +47,4 @@ Instrucciones para levantar el servidor de señalización y el cliente GUI.
 - La señalización viaja por TLS con cert self-signed (el cliente acepta por verificador inseguro).
 - SRTP se activa si el handshake DTLS completa; de lo contrario, el tráfico va en claro.
 - Logs: servidor y cliente escriben en `roomrtc.log` (configurable en cada conf).
+# 25C2-cargo-y-descargo-calandria

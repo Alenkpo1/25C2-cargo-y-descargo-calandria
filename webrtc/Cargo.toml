@@ -11,6 +11,8 @@ rand = "0.8"
 openssl = { version = "0.10.64", features = ["vendored"] }
 hex = "0.4"
 udp-dtls = "0.1.0"
+cpal = "0.15"
+audiopus = "0.3.0-rc.0"
 
 [lib]
 name = "room_rtc"

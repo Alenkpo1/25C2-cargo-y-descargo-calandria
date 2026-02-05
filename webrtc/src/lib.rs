@@ -4,6 +4,7 @@ pub mod rtc;
 pub mod sdp_helper;
 pub mod stun;
 
+pub mod audio;
 pub mod camera;
 pub mod codec;
 pub mod crypto;

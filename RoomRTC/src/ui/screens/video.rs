@@ -133,7 +133,13 @@ impl VideoCall {
                     let video_params = self.video;
                     thread::spawn(move || {
                         let res = match client.start_media(0, video_params) {
-                            Ok(_) => Ok(client),
+                            Ok(_) => {
+                                // Also start audio
+                                if let Err(e) = client.start_audio() {
+                                    eprintln!("Failed to start audio: {}", e);
+                                }
+                                Ok(client)
+                            }
                             Err(e) => Err((client, e.to_string())),
                         };
                         let _ = tx.send(res);
@@ -264,14 +270,26 @@ impl VideoCall {
 
             ui.add_space(16.0);
 
-            if ui.add(Button::new("Hang up")).clicked() {
-                if let Some(client) = self.client.as_mut() {
-                    Self::send_hangup_signal(client);
+            ui.horizontal(|ui| {
+                // Mute/Unmute button
+                if let Some(client) = self.client.as_ref() {
+                    let is_muted = client.is_muted();
+                    let mute_text = if is_muted { "🔇 Unmute" } else { "🎤 Mute" };
+                    if ui.add(Button::new(mute_text)).clicked() {
+                        client.toggle_mute();
+                    }
                 }
-                self.stop_current_call();
-                self.status_message = Some("You ended the call.".to_string());
-                next_action = Some(VideoMeetAction::GoToLobby);
-            }
+
+                // Hang up button
+                if ui.add(Button::new("📞 Hang up")).clicked() {
+                    if let Some(client) = self.client.as_mut() {
+                        Self::send_hangup_signal(client);
+                    }
+                    self.stop_current_call();
+                    self.status_message = Some("You ended the call.".to_string());
+                    next_action = Some(VideoMeetAction::GoToLobby);
+                }
+            });
         });
 
         next_action

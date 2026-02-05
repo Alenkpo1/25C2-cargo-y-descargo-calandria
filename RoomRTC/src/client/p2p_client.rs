@@ -156,10 +156,8 @@ impl P2PClient {
 
     /// Sets the audio incoming sender (called from VideoCall after WorkerAudio is created).
     pub fn set_audio_incoming(&self, sender: SyncSender<Vec<u8>>) {
-        eprintln!("[P2P_CLIENT] Setting audio incoming sender...");
         if let Ok(mut guard) = self.audio_incoming.lock() {
             *guard = Some(sender);
-            eprintln!("[P2P_CLIENT] Audio incoming sender SET successfully.");
         }
     }
 
@@ -170,7 +168,6 @@ impl P2PClient {
         }
         if let Ok(mut guard) = self.audio_incoming.lock() {
             *guard = None;
-            eprintln!("[P2P_CLIENT] Audio incoming sender CLEARED.");
         }
         self.media_metrics = None;
     }
@@ -265,19 +262,10 @@ impl P2PClient {
                             
                             if ssrc == 2000 {
                                 // Audio packet
-                                // eprintln!("[LISTENER] Routing audio packet: SSRC={}, seq={}, size={}", 
-                                //     ssrc, header.get_sequence_number(), bytes.len());
                                 if let Ok(lock) = audio_input.lock() {
                                     if let Some(tx) = lock.as_ref() {
                                         let _ = tx.send(bytes);
-                                    } else {
-                                        // Only log occasionally to avoid spam
-                                        if packet_count % 100 == 0 {
-                                            eprintln!("[LISTENER] WARNING: Audio channel not connected (None)!");
-                                        }
                                     }
-                                } else {
-                                    eprintln!("[LISTENER] Failed to lock audio_input!");
                                 }
                             } else {
                                 // Video packet (or default)

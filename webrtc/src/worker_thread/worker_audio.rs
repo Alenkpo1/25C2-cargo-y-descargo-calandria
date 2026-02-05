@@ -182,9 +182,6 @@ impl WorkerAudio {
             while running_dec.load(Ordering::Relaxed) {
                 match rx_incoming.recv() {
                     Ok(rtp_data) => {
-                        if rtp_data.len() > 12 && rand::random::<u8>() < 5 { // 2% chance log
-                             eprintln!("[WORKER_AUDIO] RTP Recv size={}", rtp_data.len());
-                        }
                         if rtp_data.len() < 12 {
                             continue;
                         }
@@ -211,14 +208,7 @@ impl WorkerAudio {
                         };
 
                         if let Ok(pcm) = decoder.decode(&opus_data) {
-                            if rand::random::<u8>() < 5 {
-                                eprintln!("[WORKER_AUDIO] Decoded {} samples -> sending to playback", pcm.len());
-                            }
-                            match tx_pcm_playback.try_send(pcm) {
-                                Ok(_) => {},
-                                Err(std::sync::mpsc::TrySendError::Full(_)) => eprintln!("[WORKER_AUDIO] Playback buffer FULL"),
-                                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => eprintln!("[WORKER_AUDIO] Playback disconnected!"),
-                            }
+                            let _ = tx_pcm_playback.try_send(pcm);
                         }
                     }
                     Err(_) => break,

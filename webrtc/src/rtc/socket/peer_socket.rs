@@ -126,6 +126,22 @@ impl PeerSocket {
         }
     }
 
+    /// Update the remote address if it has changed (e.g., after NAT rebinding).
+    /// This is called when we receive a packet from a different address than expected.
+    pub fn update_remote_addr(&mut self, new_addr: SocketAddr) {
+        if let Some(current) = self.remote_addr {
+            if current != new_addr {
+                println!(
+                    "DEBUG: Remote address changed from {} to {} (NAT rebind detected)",
+                    current, new_addr
+                );
+                self.remote_addr = Some(new_addr);
+            }
+        } else {
+            self.remote_addr = Some(new_addr);
+        }
+    }
+
     /// Returns the receiver channel associated with the listener thread.
     pub fn get_receiver(&mut self) -> Result<Receiver<(Vec<u8>, SocketAddr)>, PeerSocketErr> {
         if let Some(receiver) = self.receiver.take() {

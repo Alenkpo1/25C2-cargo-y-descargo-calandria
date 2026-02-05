@@ -178,8 +178,15 @@ impl P2PClient {
 
         let srtp_context = self.peer_connection.lock().unwrap().srtp_context();
 
+        let pc_for_addr_update = Arc::clone(&self.peer_connection);
+
         let handle = thread::spawn(move || {
-            while let Ok((data, _addr)) = receiver.recv() {
+            while let Ok((data, src_addr)) = receiver.recv() {
+                // Update remote address if it changed (NAT rebind after reconnection)
+                if let Ok(mut pc) = pc_for_addr_update.lock() {
+                    pc.update_remote_addr(src_addr);
+                }
+
                 // Intentamos descifrar el paquete. Si falla, lo tratamos como texto.
                 let mut decrypted_data = data.clone();
                 if let Some(ctx) = &srtp_context {

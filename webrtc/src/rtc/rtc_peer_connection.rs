@@ -102,6 +102,13 @@ impl RtcPeerConnection {
         Ok(socket.remote_addr())
     }
 
+    /// Updates the remote address if it changed (e.g., after NAT rebinding).
+    pub fn update_remote_addr(&mut self, new_addr: SocketAddr) {
+        if let Ok(mut socket) = self.socket.lock() {
+            socket.update_remote_addr(new_addr);
+        }
+    }
+
     pub fn media_socket(&self) -> Arc<Mutex<PeerSocket>> {
         Arc::clone(&self.socket)
     }

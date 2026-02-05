@@ -179,9 +179,21 @@ impl P2PClient {
         let srtp_context = self.peer_connection.lock().unwrap().srtp_context();
 
         let pc_for_addr_update = Arc::clone(&self.peer_connection);
+        let mut last_packet_time = std::time::Instant::now();
+        let mut packet_count: u64 = 0;
 
         let handle = thread::spawn(move || {
             while let Ok((data, src_addr)) = receiver.recv() {
+                packet_count += 1;
+                let now = std::time::Instant::now();
+                let gap = now.duration_since(last_packet_time).as_millis();
+                
+                // Log if there was a gap > 1 second (possible reconnection)
+                if gap > 1000 {
+                    println!("DEBUG: Packet received after {}ms gap from {} (total: {})", gap, src_addr, packet_count);
+                }
+                last_packet_time = now;
+
                 // Update remote address if it changed (NAT rebind after reconnection)
                 if let Ok(mut pc) = pc_for_addr_update.lock() {
                     pc.update_remote_addr(src_addr);

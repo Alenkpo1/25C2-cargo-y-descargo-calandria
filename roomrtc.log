@@ -36,3 +36,8 @@
 [INFO][1770252389] Oferta aceptada por el peer remoto
 [INFO][1770252516] Llamada finalizada
 [ERROR][1770253134] Error de señalización: Connection close: unexpected end of file
+[INFO][1770253247] Successful login to signaling server
+[INFO][1770253313] Llamada finalizada
+[INFO][1770253315] Llamada entrante recibida
+[INFO][1770253394] Llamada finalizada
+[INFO][1770253404] Llamada entrante recibida

@@ -54,6 +54,7 @@ impl From<OpusError> for WorkerAudioError {
 /// Manages audio transmission and reception.
 pub struct WorkerAudio {
     capture: Option<AudioCapture>,
+    playback: Option<AudioPlayback>, // Keep playback alive
     tx_incoming: SyncSender<Vec<u8>>,
     running: Arc<AtomicBool>,
     #[allow(dead_code)]
@@ -79,7 +80,7 @@ impl WorkerAudio {
         let capture = AudioCapture::new(tx_pcm_capture)?;
 
         // Start audio playback
-        let _playback = AudioPlayback::new(rx_pcm_playback)?;
+        let playback = AudioPlayback::new(rx_pcm_playback)?;
 
         // Encoder thread: PCM -> Opus
         let running_enc = Arc::clone(&running);
@@ -228,6 +229,7 @@ impl WorkerAudio {
 
         Ok(Self {
             capture: Some(capture),
+            playback: Some(playback),
             tx_incoming,
             running,
             handles,

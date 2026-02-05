@@ -133,10 +133,11 @@ impl AudioPlayback {
         let callback_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let callback_counter = Arc::clone(&callback_count);
 
+        // Use f32 stream to match device format
         device
             .build_output_stream(
                 config,
-                move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     let count = callback_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if count == 0 || count % 100 == 0 {
                         println!("[PLAYBACK-CALLBACK] Callback #{}, requested {} samples", count, data.len());
@@ -144,17 +145,19 @@ impl AudioPlayback {
                     }
                     if let Ok(mut buf) = buffer.lock() {
                         // Stereo output: duplicate each mono sample to both channels
+                        // Convert i16 to f32 (normalize -32768..32767 to -1.0..1.0)
                         for chunk in data.chunks_mut(2) {
                             let mono_sample = buf.pop_front().unwrap_or(0);
+                            let f32_sample = mono_sample as f32 / 32768.0;
                             if chunk.len() == 2 {
-                                chunk[0] = mono_sample; // Left channel
-                                chunk[1] = mono_sample; // Right channel
+                                chunk[0] = f32_sample; // Left channel
+                                chunk[1] = f32_sample; // Right channel
                             }
                         }
                     } else {
                         // If lock fails, output silence
                         for sample in data.iter_mut() {
-                            *sample = 0;
+                            *sample = 0.0;
                         }
                     }
                 },

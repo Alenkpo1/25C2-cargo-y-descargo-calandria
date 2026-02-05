@@ -44,7 +44,12 @@ impl AudioPlayback {
             .default_output_device()
             .ok_or(AudioPlaybackError::NoOutputDevice)?;
 
+        eprintln!("[PLAYBACK] Using device: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
+
         let config = Self::find_config(&device)?;
+        eprintln!("[PLAYBACK] Config: channels={}, sample_rate={}, sample_format={:?}", 
+            config.channels, config.sample_rate.0, SampleFormat::I16);
+
         let buffer: Arc<Mutex<VecDeque<i16>>> =
             Arc::new(Mutex::new(VecDeque::with_capacity(BUFFER_SIZE * 2)));
 
@@ -72,6 +77,8 @@ impl AudioPlayback {
         stream
             .play()
             .map_err(|e| AudioPlaybackError::PlayStreamError(e.to_string()))?;
+
+        eprintln!("[PLAYBACK] Stream started successfully");
 
         Ok(Self {
             stream: Some(stream),

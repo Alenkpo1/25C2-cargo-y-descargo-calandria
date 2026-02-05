@@ -94,27 +94,33 @@ impl AudioPlayback {
     }
 
     fn find_config(device: &Device) -> Result<StreamConfig, AudioPlaybackError> {
+        eprintln!("[PLAYBACK] Finding config for device...");
         let supported = device
             .supported_output_configs()
             .map_err(|_| AudioPlaybackError::NoSupportedConfig)?;
 
+        eprintln!("[PLAYBACK] Available configs:");
         for config in supported {
-            if config.channels() == CHANNELS && config.sample_format() == SampleFormat::I16 {
-                if config.min_sample_rate().0 <= SAMPLE_RATE
-                    && config.max_sample_rate().0 >= SAMPLE_RATE
-                {
-                    return Ok(config
-                        .with_sample_rate(cpal::SampleRate(SAMPLE_RATE))
-                        .into());
-                }
-            }
+            eprintln!("[PLAYBACK]   - channels={}, format={:?}, rate={}-{}",
+                config.channels(),
+                config.sample_format(),
+                config.min_sample_rate().0,
+                config.max_sample_rate().0
+            );
         }
 
-        // Fallback: use default config
-        device
+        // Use default config directly - let ALSA/PipeWire handle conversion
+        let default_config = device
             .default_output_config()
-            .map(|c| c.into())
-            .map_err(|_| AudioPlaybackError::NoSupportedConfig)
+            .map_err(|_| AudioPlaybackError::NoSupportedConfig)?;
+        
+        eprintln!("[PLAYBACK] Using default config: channels={}, format={:?}, rate={}",
+            default_config.channels(),
+            default_config.sample_format(),
+            default_config.sample_rate().0
+        );
+        
+        Ok(default_config.into())
     }
 
     fn build_stream(
@@ -132,8 +138,9 @@ impl AudioPlayback {
                 config,
                 move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                     let count = callback_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count % 100 == 0 {
-                        eprintln!("[PLAYBACK] Callback #{}, requested {} samples", count, data.len());
+                    if count == 0 || count % 100 == 0 {
+                        println!("[PLAYBACK-CALLBACK] Callback #{}, requested {} samples", count, data.len());
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                     }
                     if let Ok(mut buf) = buffer.lock() {
                         // Stereo output: duplicate each mono sample to both channels

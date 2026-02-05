@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 const SAMPLE_RATE: u32 = 48000;
-const CHANNELS: u16 = 1;
+const CHANNELS: u16 = 2; // Stereo for better compatibility
 const BUFFER_SIZE: usize = 4800; // 100ms buffer at 48kHz
 
 /// Error type for audio playback operations.
@@ -136,8 +136,13 @@ impl AudioPlayback {
                         eprintln!("[PLAYBACK] Callback #{}, requested {} samples", count, data.len());
                     }
                     if let Ok(mut buf) = buffer.lock() {
-                        for sample in data.iter_mut() {
-                            *sample = buf.pop_front().unwrap_or(0);
+                        // Stereo output: duplicate each mono sample to both channels
+                        for chunk in data.chunks_mut(2) {
+                            let mono_sample = buf.pop_front().unwrap_or(0);
+                            if chunk.len() == 2 {
+                                chunk[0] = mono_sample; // Left channel
+                                chunk[1] = mono_sample; // Right channel
+                            }
                         }
                     } else {
                         // If lock fails, output silence

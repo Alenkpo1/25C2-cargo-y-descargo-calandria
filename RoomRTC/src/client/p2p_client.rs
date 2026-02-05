@@ -7,8 +7,9 @@ use room_rtc::rtc::rtc_peer_connection::{
 };
 use room_rtc::worker_thread::error::worker_error::WorkerError;
 use room_rtc::worker_thread::media_metrics::{CallMetricsSnapshot, MediaMetrics};
-use room_rtc::worker_thread::worker_audio::{WorkerAudio, WorkerAudioError};
 use room_rtc::worker_thread::worker_media::{VideoParams, WorkerMedia};
+use room_rtc::crypto::srtp::SrtpContext;
+use room_rtc::rtc::socket::peer_socket::PeerSocket;
 use std::net::SocketAddr;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
@@ -20,9 +21,7 @@ pub struct P2PClient {
     peer_connection: Arc<Mutex<RtcPeerConnection>>,
     listener_handle: Option<JoinHandle<()>>,
     media_worker: Option<WorkerMedia>,
-    audio_worker: Option<WorkerAudio>,
     media_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
-    audio_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
     media_metrics: Option<Arc<Mutex<MediaMetrics>>>,
 }
 
@@ -34,9 +33,7 @@ impl P2PClient {
             peer_connection,
             listener_handle: None,
             media_worker: None,
-            audio_worker: None,
             media_incoming: Arc::new(Mutex::new(None)),
-            audio_incoming: Arc::new(Mutex::new(None)),
             media_metrics: None,
         })
     }
@@ -148,51 +145,19 @@ impl P2PClient {
         Ok(())
     }
 
-    /// Starts audio capture and playback.
-    pub fn start_audio(&mut self) -> Result<(), WorkerAudioError> {
-        if self.audio_worker.is_some() {
-            return Ok(());
-        }
-
+    /// Returns the socket and SRTP context for audio (to be started in UI thread).
+    pub fn audio_params(&self) -> (Arc<Mutex<PeerSocket>>, Option<SrtpContext>) {
         let socket = self.peer_connection.lock().unwrap().media_socket();
         let context = self.peer_connection.lock().unwrap().srtp_context();
-        let audio = WorkerAudio::start(socket, context)?;
-        let incoming = audio.incoming_sender();
-        {
-            if let Ok(mut guard) = self.audio_incoming.lock() {
-                *guard = Some(incoming);
-            }
-        }
-        self.audio_worker = Some(audio);
-        Ok(())
+        (socket, context)
     }
 
     pub fn stop_media(&mut self) {
         self.media_worker.take();
-        self.audio_worker.take();
         if let Ok(mut guard) = self.media_incoming.lock() {
             *guard = None;
         }
-        if let Ok(mut guard) = self.audio_incoming.lock() {
-            *guard = None;
-        }
         self.media_metrics = None;
-    }
-
-    /// Toggles mute state and returns the new state (true = muted).
-    pub fn toggle_mute(&self) -> bool {
-        self.audio_worker
-            .as_ref()
-            .map(|w| w.toggle_mute())
-            .unwrap_or(false)
-    }
-
-    /// Returns whether the microphone is currently muted.
-    pub fn is_muted(&self) -> bool {
-        self.audio_worker
-            .as_ref()
-            .map(|w| w.is_muted())
-            .unwrap_or(false)
     }
 
     pub fn try_recv_local_frame(&self) -> Option<Mat> {

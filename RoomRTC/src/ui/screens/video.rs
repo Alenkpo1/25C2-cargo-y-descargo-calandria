@@ -6,6 +6,7 @@ use eframe::egui::{
 use opencv::core::Mat;
 use opencv::prelude::*;
 use room_rtc::worker_thread::media_metrics::CallMetricsSnapshot;
+use room_rtc::worker_thread::worker_audio::WorkerAudio;
 use room_rtc::worker_thread::worker_media::VideoParams;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Receiver;
@@ -28,6 +29,8 @@ pub struct VideoCall {
     media_loader: Option<Receiver<Result<P2PClient, (P2PClient, String)>>>,
     unstable: bool,
     last_remote_seen: Option<std::time::Instant>,
+    audio_started: bool,
+    audio_worker: Option<WorkerAudio>,
 }
 
 impl VideoCall {
@@ -46,6 +49,8 @@ impl VideoCall {
             media_loader: None,
             unstable: false,
             last_remote_seen: None,
+            audio_started: false,
+            audio_worker: None,
         }
     }
 
@@ -80,6 +85,8 @@ impl VideoCall {
         self.local_texture = None;
         self.remote_texture = None;
         self.media_started = false;
+        self.audio_started = false;
+        self.audio_worker = None;
         self.status_message = None;
         self.message_inbox = None;
         self.processed_messages = 0;
@@ -133,13 +140,7 @@ impl VideoCall {
                     let video_params = self.video;
                     thread::spawn(move || {
                         let res = match client.start_media(0, video_params) {
-                            Ok(_) => {
-                                // Also start audio
-                                if let Err(e) = client.start_audio() {
-                                    eprintln!("Failed to start audio: {}", e);
-                                }
-                                Ok(client)
-                            }
+                            Ok(_) => Ok(client),
                             Err(e) => Err((client, e.to_string())),
                         };
                         let _ = tx.send(res);
@@ -151,54 +152,73 @@ impl VideoCall {
             }
 
             //Update textures if media has started
-            if self.media_started && let Some(client) = self.client.as_ref() {
-                self.quality_metrics = client.metrics_snapshot();
-                if let Some(frame) = client.try_recv_local_frame()
-                    && let Some(image) = Self::mat_to_color_image(&frame)
-                {
-                    Self::update_texture(
-                        ctx,
-                        &mut self.local_texture,
-                        "roomrtc-local-preview",
-                        image,
-                    );
-                }
-
-                if let Some(frame) = client.try_recv_remote_frame()
-                    && let Some(image) = Self::mat_to_color_image(&frame)
-                {
-                    self.last_remote_seen = Some(std::time::Instant::now());
-                    Self::update_texture(
-                        ctx,
-                        &mut self.remote_texture,
-                        "roomrtc-remote-preview",
-                        image,
-                    );
-                }
-
-                ctx.request_repaint();
-
-                // Heartbeat remoto: si hay actividad reciente, refrescamos el último visto
-                if let Some(metrics) = &self.quality_metrics {
-                    if let Some(ms) = metrics.since_last_ms {
-                        if ms < 2_000 {
-                            self.last_remote_seen = Some(std::time::Instant::now());
+            if self.media_started {
+                // Start audio once media is ready (must be in main thread due to cpal)
+                if !self.audio_started {
+                    if let Some(client) = self.client.as_ref() {
+                        let (socket, context) = client.audio_params();
+                        match WorkerAudio::start(socket, context) {
+                            Ok(worker) => {
+                                self.audio_worker = Some(worker);
+                                self.audio_started = true;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to start audio: {}", e);
+                                self.audio_started = true; // Don't retry
+                            }
                         }
                     }
                 }
-                // Evaluar inactividad remota con umbral más amplio
-                if let Some(last_seen) = self.last_remote_seen {
-                    let gap = last_seen.elapsed().as_millis() as u64;
-                    self.unstable = gap > 2_000 && gap <= 30_000;
-                    if gap > 30_000 {
-                        self.status_message =
-                            Some("Conexión perdida, finalizando llamada".to_string());
-                        Self::send_hangup_signal(client);
-                        self.stop_current_call();
-                        next_action = Some(VideoMeetAction::GoToLobby);
+                
+                if let Some(client) = self.client.as_ref() {
+                    self.quality_metrics = client.metrics_snapshot();
+                    if let Some(frame) = client.try_recv_local_frame()
+                        && let Some(image) = Self::mat_to_color_image(&frame)
+                    {
+                        Self::update_texture(
+                            ctx,
+                            &mut self.local_texture,
+                            "roomrtc-local-preview",
+                            image,
+                        );
                     }
-                } else {
-                    self.unstable = false;
+
+                    if let Some(frame) = client.try_recv_remote_frame()
+                        && let Some(image) = Self::mat_to_color_image(&frame)
+                    {
+                        self.last_remote_seen = Some(std::time::Instant::now());
+                        Self::update_texture(
+                            ctx,
+                            &mut self.remote_texture,
+                            "roomrtc-remote-preview",
+                            image,
+                        );
+                    }
+
+                    ctx.request_repaint();
+
+                    // Heartbeat remoto: si hay actividad reciente, refrescamos el último visto
+                    if let Some(metrics) = &self.quality_metrics {
+                        if let Some(ms) = metrics.since_last_ms {
+                            if ms < 2_000 {
+                                self.last_remote_seen = Some(std::time::Instant::now());
+                            }
+                        }
+                    }
+                    // Evaluar inactividad remota con umbral más amplio
+                    if let Some(last_seen) = self.last_remote_seen {
+                        let gap = last_seen.elapsed().as_millis() as u64;
+                        self.unstable = gap > 2_000 && gap <= 30_000;
+                        if gap > 30_000 {
+                            self.status_message =
+                                Some("Conexión perdida, finalizando llamada".to_string());
+                            Self::send_hangup_signal(client);
+                            self.stop_current_call();
+                            next_action = Some(VideoMeetAction::GoToLobby);
+                        }
+                    } else {
+                        self.unstable = false;
+                    }
                 }
             }
         }
@@ -272,11 +292,11 @@ impl VideoCall {
 
             ui.horizontal(|ui| {
                 // Mute/Unmute button
-                if let Some(client) = self.client.as_ref() {
-                    let is_muted = client.is_muted();
+                if let Some(audio) = &self.audio_worker {
+                    let is_muted = audio.is_muted();
                     let mute_text = if is_muted { "🔇 Unmute" } else { "🎤 Mute" };
                     if ui.add(Button::new(mute_text)).clicked() {
-                        client.toggle_mute();
+                        audio.toggle_mute();
                     }
                 }
 

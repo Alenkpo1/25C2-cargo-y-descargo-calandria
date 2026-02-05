@@ -1,10 +1,6 @@
 use crate::client::signaling_client::{SignalingClient, SignalingEvent};
 use crate::logger::Logger;
-use crate::ui::screens::login::egui::Color32;
-use crate::ui::screens::login::egui::Rounding;
-use crate::ui::screens::login::egui::Stroke;
-use crate::ui::screens::login::egui::Vec2;
-use eframe::egui::{self, Button};
+use eframe::egui::{self, Button, Vec2};
 use egui::RichText;
 use egui::TextStyle;
 pub enum LoginAction {
@@ -89,96 +85,86 @@ impl LoginScreen {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Login");
-            ui.separator();
-
+            // Center everything vertically and horizontally
             ui.vertical_centered(|ui| {
-                ui.group(|ui| {
-                    ui.set_width(250.0);
-                    let mut visuals = ui.style().visuals.clone();
-                    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::BLACK);
-                    visuals.widgets.inactive.rounding = Rounding::from(2.0);
-                    ui.style_mut().visuals = visuals;
+                ui.add_space(ui.available_height() * 0.15);
+                
+                // Login Card
+                egui::Frame::none()
+                    .fill(crate::ui::theme::colors::BACKGROUND_SECONDARY)
+                    .rounding(crate::ui::screens::login::egui::Rounding::same(8.0))
+                    .shadow(eframe::egui::Shadow::default())
+                    .inner_margin(24.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(320.0);
+                        
+                        // Header
+                        ui.heading(RichText::new("Welcome Back!").size(24.0).color(egui::Color32::WHITE));
+                        ui.label(RichText::new("We're so excited to see you again!").color(crate::ui::theme::colors::TEXT_MUTED));
+                        ui.add_space(20.0);
+                        
+                        // Inputs styling
+                        let input_frame = |ui: &mut egui::Ui, label: &str, value: &mut String, password: bool, hint: &str| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(label.to_uppercase()).size(12.0).strong().color(crate::ui::theme::colors::TEXT_MUTED));
+                            });
+                            ui.add_space(4.0);
+                            
+                            let edit = egui::TextEdit::singleline(value)
+                                .password(password)
+                                .hint_text(hint)
+                                .desired_width(f32::INFINITY)
+                                .margin(egui::vec2(10.0, 10.0)); // Padding inside input
+                                
+                            ui.add(edit);
+                            ui.add_space(16.0);
+                        };
 
-                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                        ui.label("Server:");
-                    });
+                        input_frame(ui, "Server Address", &mut self.server_addr, false, "127.0.0.1:8080");
+                        input_frame(ui, "Username", &mut self.username, false, "Enter your username");
+                        input_frame(ui, "Password", &mut self.password, true, "Enter your password");
+                        
+                        ui.add_space(10.0);
 
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.server_addr)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("Enter text here..."),
-                    );
-                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                        ui.label("User:");
-                    });
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.username)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("Enter username here..."),
-                    );
-
-                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                        ui.label("Password:");
-                    });
-                    ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
-                });
-            });
-            ui.add_space(10.0);
-            ui.vertical_centered(|ui| {
-                let login_btn = Button::new(
-                    RichText::new("Login")
-                        .text_style(TextStyle::Button)
-                        .color(egui::Color32::WHITE)
-                        .size(20.0),
-                )
-                .fill(egui::Color32::BLUE)
-                .rounding(egui::Rounding::same(10.0))
-                .min_size(Vec2::new(180.0, 40.0));
-                let res_login_btn = ui.add(login_btn);
-
-                if res_login_btn.clicked() {
-                    // REQUEST: LOGIN
-                    if let Ok(client) = SignalingClient::connect(&self.server_addr) {
-                        let _ = client.login(&self.username, &self.password);
-                        self.pending_client = Some(client);
-                        self.pending_action = Some(PendingAction::Login);
-                        self.status_message = Some("Logging in...".to_string());
-                    } else {
-                        self.status_message =
-                            Some("Could not connect to signaling server".to_string());
-                    }
-                }
-                ui.add_space(10.0);
-                ui.separator();
-                ui.label("Need an account? Type your credentials and");
-                let sign_up = Button::new(
-                    RichText::new("SIGN UP")
-                        .text_style(TextStyle::Button)
-                        .size(15.0)
-                        .underline(),
-                );
-                let res_sign_up = ui.add(sign_up);
-                if res_sign_up.clicked() {
-                    if let Ok(client) = SignalingClient::connect(&self.server_addr) {
-                        let _ = client.register(&self.username, &self.password);
-                        self.pending_client = Some(client);
-                        self.pending_action = Some(PendingAction::RegisterThenLogin);
-                        self.status_message = Some("Signing up user on the server...".to_string());
-                        if let Some(log) = &self.logger {
-                            log.info("User registration sent");
+                        // Login Button (Primary)
+                        let login_btn = Button::new(RichText::new("Log In").size(16.0).color(egui::Color32::WHITE))
+                            .fill(crate::ui::theme::colors::PRIMARY)
+                            .rounding(4.0)
+                            .min_size(Vec2::new(f32::INFINITY, 44.0));
+                        
+                        if ui.add(login_btn).clicked() {
+                            if let Ok(client) = SignalingClient::connect(&self.server_addr) {
+                                let _ = client.login(&self.username, &self.password);
+                                self.pending_client = Some(client);
+                                self.pending_action = Some(PendingAction::Login);
+                                self.status_message = Some("Logging in...".to_string());
+                            } else {
+                                self.status_message = Some("Could not connect to signaling server".to_string());
+                            }
                         }
-                    } else {
-                        self.status_message =
-                            Some("Could not connect to signaling server".to_string());
-                    }
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Need an account?").color(crate::ui::theme::colors::TEXT_MUTED));
+                            if ui.link("Register").clicked() {
+                                if let Ok(client) = SignalingClient::connect(&self.server_addr) {
+                                    let _ = client.register(&self.username, &self.password);
+                                    self.pending_client = Some(client);
+                                    self.pending_action = Some(PendingAction::RegisterThenLogin);
+                                    self.status_message = Some("Registering...".to_string());
+                                } else {
+                                    self.status_message = Some("Could not connect to server".to_string());
+                                }
+                            }
+                        });
+                    });
+
+                if let Some(status) = &self.status_message {
+                    ui.add_space(20.0);
+                    ui.label(RichText::new(status).color(crate::ui::theme::colors::DANGER));
                 }
             });
-
-            if let Some(status) = &self.status_message {
-                ui.separator();
-                ui.label(status);
-            }
         });
 
         login_result

@@ -13,6 +13,9 @@ pub fn run(config: AppConfig) -> eframe::Result<()> {
     eframe::run_native(
         "RoomRTC - P2P Video Meets",
         opt,
-        Box::new(|_cc| Ok(Box::new(MainApp::new(config)))),
+        Box::new(|cc| {
+            crate::ui::theme::configure_visuals(&cc.egui_ctx);
+            Ok(Box::new(MainApp::new(config)))
+        }),
     )
 }

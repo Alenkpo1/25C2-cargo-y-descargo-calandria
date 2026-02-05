@@ -69,13 +69,17 @@ pub fn user_row(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if status.is_callable(name, current_user) {
-                let call_btn = Button::new("📷 VideoCall").min_size(Vec2::new(54.0, 24.0));
+                let call_btn = Button::new(egui::RichText::new("📷 Call").color(egui::Color32::WHITE))
+                    .fill(crate::ui::theme::colors::SUCCESS)
+                    .rounding(4.0)
+                    .min_size(Vec2::new(60.0, 24.0));
+                    
                 let res_call_btn = ui.add(call_btn);
                 if res_call_btn.clicked() {
                     action = Some(LobbyAction::GoToWaitingCall(name.to_string()));
                 }
             } else {
-                ui.label("");
+                ui.label(egui::RichText::new("Busy/Offline").size(10.0).color(crate::ui::theme::colors::TEXT_MUTED));
             }
         });
     });

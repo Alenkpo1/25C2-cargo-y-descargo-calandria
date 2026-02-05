@@ -3,7 +3,6 @@ use crate::client::signaling_client::SignalingClient;
 use crate::client::webrtc_service::WebRTCHandler;
 use eframe::egui::{self, Button};
 use egui::RichText;
-use egui::TextStyle;
 use egui::Vec2;
 use room_rtc::rtc::rtc_peer_connection::PeerConnectionRole;
 use std::sync::{Arc, Mutex};
@@ -91,96 +90,84 @@ impl JoinMeetScreen {
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             // Shows the incoming call screen
+            // Shows the incoming call screen
             if let Some(status) = &self.status_message {
-                ui.separator();
-                ui.label(status);
+                ui.label(RichText::new(status).color(crate::ui::theme::colors::TEXT_PRIMARY));
+                ui.add_space(10.0);
             }
+            
             if self.incoming_from.is_some() {
-                if let Some(from) = &self.incoming_from {
-                    ui.label(format!("{} is calling you", from));
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            let accept_btn = Button::new(
-                                RichText::new("📞").text_style(TextStyle::Button).size(20.0),
-                            )
-                            .fill(egui::Color32::LIGHT_GREEN)
-                            .rounding(egui::Rounding::same(10.0))
-                            .min_size(Vec2::new(100.0, 50.0));
-                            let res_accept_btn = ui.add(accept_btn);
-                            if res_accept_btn.clicked() {
-                                if let Some(signaling) = signaling {
-                                    match self.accept_current_call(signaling) {
-                                        Ok(_) => {
-                                            self.status_message =
-                                                Some("Answer sent... Starting ICE...".into());
-                                            next_action = Some(JoinMeetAction::GoToVideo);
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    
+                    egui::Frame::none()
+                        .fill(crate::ui::theme::colors::BACKGROUND_SECONDARY)
+                        .rounding(16.0)
+                        .shadow(eframe::egui::Shadow::default())
+                        .inner_margin(32.0)
+                        .show(ui, |ui| {
+                            let caller = self.incoming_from.as_deref().unwrap_or("Unknown");
+                            ui.heading(RichText::new("Incoming Call").size(24.0).color(egui::Color32::WHITE));
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(format!("{} is calling you...", caller)).size(18.0).color(crate::ui::theme::colors::TEXT_PRIMARY));
+                            ui.add_space(32.0);
+                            
+                            ui.horizontal(|ui| {
+                                ui.add_space(20.0);
+                                // Accept Button
+                                let accept_btn = Button::new(RichText::new("📞 Accept").size(20.0).color(egui::Color32::WHITE))
+                                    .fill(crate::ui::theme::colors::SUCCESS)
+                                    .rounding(30.0) // Circular/Pill
+                                    .min_size(Vec2::new(140.0, 60.0));
+                                    
+                                if ui.add(accept_btn).clicked() {
+                                    if let Some(signaling) = signaling {
+                                        match self.accept_current_call(signaling) {
+                                            Ok(_) => {
+                                                self.status_message =
+                                                    Some("Answer sent... Starting ICE...".into());
+                                                next_action = Some(JoinMeetAction::GoToVideo);
+                                            }
+                                            Err(err) => self.status_message = Some(err),
                                         }
-                                        Err(err) => self.status_message = Some(err),
-                                    }
-                                } else {
-                                    self.status_message =
-                                        Some("First connect to the signaling server.".to_string());
-                                }
-                            }
-                            ui.add_space(20.0);
-                            let decline_btn = Button::new(
-                                RichText::new("☎").text_style(TextStyle::Button).size(20.0),
-                            )
-                            .fill(egui::Color32::LIGHT_RED)
-                            .rounding(egui::Rounding::same(10.0))
-                            .min_size(Vec2::new(100.0, 50.0));
-                            let res_decline_btn = ui.add(decline_btn);
-                            if res_decline_btn.clicked() {
-                                if let Some(signaling) = signaling
-                                    && let Some(peer) = &self.incoming_from
-                                {
-                                    let _ = signaling.reject_call(peer);
-                                }
-                                self.incoming_from = None;
-                                self.active_peer = None;
-                                self.status_message = Some("Call was declined".to_string());
-                            }
-                        });
-                        ui.separator();
-                        let go_meet = Button::new(
-                            RichText::new("🙌 Join meeting")
-                                .text_style(TextStyle::Button)
-                                .size(20.0),
-                        )
-                        .fill(egui::Color32::LIGHT_BLUE)
-                        .rounding(egui::Rounding::same(10.0))
-                        .min_size(Vec2::new(200.0, 50.0));
-                        let go_meet_btn = ui.add(go_meet);
-                        if go_meet_btn.clicked() {
-                            if self.client.is_none() {
-                                self.status_message = Some(
-                                    "Wait for a call and join after accepting it.".to_string(),
-                                );
-                            } else {
-                                if !self.ice_started {
-                                    if let Some(result) = self.ensure_peer_and_start_ice() {
-                                        if let Err(err) = result {
-                                            self.status_message = Some(format!("Error: {}", err));
-                                        } else {
-                                            self.status_message = Some("Iniciando conexión...".to_string());
-                                        }
-                                    }
-                                } else if let Some(client) = &self.client {
-                                    if client.has_connection() {
-                                        self.status_message = Some("Joining meeting".to_string());
-                                        next_action = Some(JoinMeetAction::GoToVideo);
                                     } else {
-                                        self.status_message = Some("Esperando conexión...".to_string());
+                                        self.status_message =
+                                            Some("First connect to the signaling server.".to_string());
                                     }
                                 }
-                            }
-                        }
-                    });
-                } else {
-                    ui.label("Waiting for incoming calls...");
-                }
+                                
+                                ui.add_space(40.0);
+                                
+                                // Decline Button
+                                let decline_btn = Button::new(RichText::new("✖ Decline").size(20.0).color(egui::Color32::WHITE))
+                                    .fill(crate::ui::theme::colors::DANGER)
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(140.0, 60.0));
+                                    
+                                if ui.add(decline_btn).clicked() {
+                                    if let Some(signaling) = signaling
+                                        && let Some(peer) = &self.incoming_from
+                                    {
+                                        let _ = signaling.reject_call(peer);
+                                    }
+                                    self.incoming_from = None;
+                                    self.active_peer = None;
+                                    self.status_message = Some("Call was declined".to_string());
+                                }
+                                ui.add_space(20.0);
+                            });
+                        });
+                });
             } else {
-                // Shows the default screen
+                 ui.vertical_centered(|ui| {
+                      ui.add_space(50.0);
+                      ui.heading(RichText::new("Waiting for calls...").color(crate::ui::theme::colors::TEXT_MUTED));
+                      ui.add_space(10.0);
+                      ui.spinner();
+                 });
+                 
+                 // Hidden advanced debug
+                 ui.collapsing("Debug / Manual Join", |ui| {
                 ui.separator();
                 ui.vertical(|ui| {
                     ui.label("Respuesta SDP local");
@@ -259,6 +246,7 @@ impl JoinMeetScreen {
                         }
                     }
                 }
+                }); // Close collapsing
             }
         });
         next_action

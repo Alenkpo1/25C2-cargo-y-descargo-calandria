@@ -20,5 +20,13 @@ fn main() -> eframe::Result<()> {
             AppConfig::default()
         }
     };
+    
+    // Apply global theme (Discord style)
+    // We need a dummy context here or apply it inside launcher::run FIRST frame.
+    // However, launcher::run takes ownership.
+    // Checking launcher.rs run function usually creates the native options.
+    // The theme must be set on the context provided by eframe during setup.
+    // So we will modify ui::launcher::run instead to apply theme on startup.
+    
     ui::launcher::run(config)
 }

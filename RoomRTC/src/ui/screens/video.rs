@@ -1,7 +1,7 @@
 use crate::client::p2p_client::P2PClient;
 use eframe::egui::load::SizedTexture;
 use eframe::egui::{
-    self, Align2, Button, Color32, ColorImage, FontId, TextureHandle, TextureOptions, Vec2,
+    self, Align2, Button, Color32, ColorImage, FontId, TextureHandle, TextureOptions, Vec2, RichText
 };
 use opencv::core::Mat;
 use opencv::prelude::*;
@@ -228,92 +228,117 @@ impl VideoCall {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading("Meeting Room");
-                if let Some(status) = &self.status_message {
-                    ui.colored_label(Color32::from_rgb(230, 90, 90), status);
-                } else if let Some(client) = self.client.as_ref() {
-                    if client.has_connection() {
-                        let peer = self
-                            .peer_username
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string());
-                        ui.colored_label(
-                            Color32::from_rgb(90, 200, 90),
-                            format!("Connected with {}", peer),
-                        );
+            // Header (Status overlay)
+            if let Some(status) = &self.status_message {
+                ui.colored_label(crate::ui::theme::colors::DANGER, status);
+            }
+            if self.unstable {
+                ui.colored_label(crate::ui::theme::colors::DANGER, "⚠ Network Unstable");
+            }
+
+            // Main Video Area (Remote)
+            let available_rect = ui.available_rect_before_wrap();
+            let control_bar_height = 80.0;
+            let video_area_height = available_rect.height() - control_bar_height;
+            
+            // Allocate space for videos
+            ui.allocate_ui_at_rect(egui::Rect::from_min_size(available_rect.min, egui::vec2(available_rect.width(), video_area_height)), |ui| {
+                ui.centered_and_justified(|ui| {
+                    if self.client.is_some() && self.media_started {
+                        // Remote Video (Primary)
+                        Self::draw_video_slot(ui, self.remote_texture.as_ref(), "Waiting for participant...", ui.available_size());
                     } else {
-                        ui.label("Waiting for connection...");
+                        ui.label(RichText::new("Connecting...").size(24.0).color(crate::ui::theme::colors::TEXT_MUTED));
                     }
-                } else {
-                    ui.label("Waiting for participant...");
-                }
-                if self.unstable {
-                    ui.colored_label(
-                        Color32::from_rgb(235, 180, 60),
-                        "Conexión inestable, reintentando...",
-                    );
-                }
-                if let Some(metrics) = &self.quality_metrics {
-                    ui.label(format!(
-                        "Quality: loss {:.1}%, jitter {:.1} ms, bitrate {:.0} kbps",
-                        metrics.packet_loss_pct, metrics.jitter_ms, metrics.bitrate_kbps
-                    ));
-                    ui.label(format!(
-                        "RTCP: seq alto {} | fracción perdida {} | pérdida acumulada {}",
-                        metrics.highest_seq, metrics.fraction_lost, metrics.cumulative_lost
-                    ));
-                }
-            });
-
-            ui.add_space(16.0);
-
-            let total_width = ui.available_width();
-            let slot_width = (total_width / 2.0).max(400.0) - 12.0;
-            let slot_height = slot_width * 9.0 / 16.0;
-            let target_size = Vec2::new(slot_width, slot_height);
-
-            ui.columns(2, |columns| {
-                columns[0].vertical_centered(|ui| {
-                    ui.label("My Camera");
-                    ui.add_space(8.0);
-                    Self::draw_video_slot(ui, self.local_texture.as_ref(), "Sin señal local", target_size);
-                });
-
-                columns[1].vertical_centered(|ui| {
-                    ui.label("Remote");
-                    ui.add_space(8.0);
-                    Self::draw_video_slot(
-                        ui,
-                        self.remote_texture.as_ref(),
-                        "Esperando al participante",
-                        target_size,
-                    );
                 });
             });
 
-            ui.add_space(16.0);
-
-            ui.horizontal(|ui| {
-                // Mute/Unmute button
-                if let Some(audio) = &self.audio_worker {
-                    let is_muted = audio.is_muted();
-                    let mute_text = if is_muted { "🔇 Unmute" } else { "🎤 Mute" };
-                    if ui.add(Button::new(mute_text)).clicked() {
-                        audio.toggle_mute();
-                    }
-                }
-
-                // Hang up button
-                if ui.add(Button::new("📞 Hang up")).clicked() {
-                    if let Some(client) = self.client.as_mut() {
-                        Self::send_hangup_signal(client);
-                    }
-                    self.stop_current_call();
-                    self.status_message = Some("You ended the call.".to_string());
-                    next_action = Some(VideoMeetAction::GoToLobby);
-                }
+            // Local Video (PiP - Bottom Right)
+            // We use a fixed relative rect for PiP
+            let pip_width = 200.0;
+            let pip_height = pip_width * 9.0 / 16.0;
+            let pip_rect = egui::Rect::from_min_size(
+                egui::pos2(
+                    available_rect.max.x - pip_width - 20.0,
+                    available_rect.min.y + video_area_height - pip_height - 20.0
+                ),
+                egui::vec2(pip_width, pip_height)
+            );
+            
+            // Draw PiP frame
+            ui.put(pip_rect, |ui: &mut egui::Ui| {
+                egui::Frame::none()
+                    .stroke(egui::Stroke::new(2.0, crate::ui::theme::colors::BACKGROUND_TERTIARY))
+                    .shadow(egui::Shadow::default())
+                    .show(ui, |ui| {
+                         Self::draw_video_slot(ui, self.local_texture.as_ref(), "No Cam", pip_rect.size());
+                    }).response
             });
+
+
+            // Floating Control Bar (Bottom)
+            egui::Area::new("control_bar".into())
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -20.0))
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(crate::ui::theme::colors::BACKGROUND_TERTIARY)
+                        .rounding(32.0)
+                        .shadow(egui::Shadow::default())
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(10.0);
+                                
+                                // Mute Button
+                                let is_muted = self.audio_worker.as_ref().map(|w| w.is_muted()).unwrap_or(false);
+                                let (mute_icon, mute_color) = if is_muted { 
+                                    ("🔇", crate::ui::theme::colors::DANGER) 
+                                } else { 
+                                    ("🎤", crate::ui::theme::colors::TEXT_PRIMARY) 
+                                };
+                                
+                                let mute_btn = Button::new(RichText::new(mute_icon).size(24.0))
+                                    .fill(if is_muted { crate::ui::theme::colors::BACKGROUND_SECONDARY } else { crate::ui::theme::colors::BACKGROUND })
+                                    .frame(true)
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(50.0, 50.0));
+                                    
+                                if ui.add(mute_btn).on_hover_text("Toggle Mute").clicked() {
+                                    if let Some(audio) = &self.audio_worker {
+                                        audio.toggle_mute();
+                                    }
+                                }
+                                
+                                ui.add_space(20.0);
+                                
+                                // Video Toggle (Placeholder for now)
+                                let video_btn = Button::new(RichText::new("📷").size(24.0))
+                                    .fill(crate::ui::theme::colors::BACKGROUND)
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(50.0, 50.0));
+                                ui.add(video_btn).on_hover_text("Toggle Video");
+                                
+                                ui.add_space(20.0);
+
+                                // Hangup Button
+                                let hangup_btn = Button::new(RichText::new("📞").size(24.0).color(egui::Color32::WHITE))
+                                    .fill(crate::ui::theme::colors::DANGER)
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(60.0, 50.0));
+                                    
+                                if ui.add(hangup_btn).on_hover_text("End Call").clicked() {
+                                    if let Some(client) = self.client.as_mut() {
+                                        Self::send_hangup_signal(client);
+                                    }
+                                    self.stop_current_call();
+                                    self.status_message = Some("Call Ended".to_string());
+                                    next_action = Some(VideoMeetAction::GoToLobby);
+                                }
+                                
+                                ui.add_space(10.0);
+                            });
+                        });
+                });
         });
 
         next_action

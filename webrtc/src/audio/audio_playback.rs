@@ -54,8 +54,12 @@ impl AudioPlayback {
         // Thread to receive samples and add to buffer
         std::thread::spawn(move || {
             while let Ok(samples) = rx.recv() {
+                eprintln!("[PLAYBACK] Received {} samples, buffer size before: {}", 
+                    samples.len(), 
+                    buffer_producer.lock().map(|b| b.len()).unwrap_or(0));
                 if let Ok(mut buf) = buffer_producer.lock() {
                     buf.extend(samples);
+                    eprintln!("[PLAYBACK] Buffer size after: {}", buf.len());
                     // Limit buffer size to prevent unbounded growth
                     while buf.len() > BUFFER_SIZE * 4 {
                         buf.pop_front();

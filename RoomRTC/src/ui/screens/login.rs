@@ -1,6 +1,9 @@
 use crate::client::signaling_client::{SignalingClient, SignalingEvent};
 use crate::logger::Logger;
-use eframe::egui::{self, Button, Vec2};
+use crate::ui::theme::colors;
+use eframe::epaint::Margin;
+use eframe::egui::{Color32, Rounding, Stroke, Vec2};
+use eframe::egui::{self, Button};
 use egui::RichText;
 use egui::TextStyle;
 pub enum LoginAction {
@@ -84,86 +87,203 @@ impl LoginScreen {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Center everything vertically and horizontally
+        egui::CentralPanel::default().frame(
+            egui::Frame::none()
+                .fill(colors::BACKGROUND)
+        ).show(ctx, |ui| {
+
+            // Fondo plano oscuro
+            let rect = ui.max_rect();
+            ui.painter().rect_filled(rect, 0.0, colors::BACKGROUND);
+
             ui.vertical_centered(|ui| {
-                ui.add_space(ui.available_height() * 0.15);
-                
-                // Login Card
+                ui.set_max_width(620.0);
+                ui.add_space(28.0);
+
+                // Encabezado compacto
                 egui::Frame::none()
-                    .fill(crate::ui::theme::colors::BACKGROUND_SECONDARY)
-                    .rounding(crate::ui::screens::login::egui::Rounding::same(8.0))
-                    .shadow(eframe::egui::Shadow::default())
-                    .inner_margin(24.0)
+                    .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 12))
+                    .rounding(Rounding::same(999.0))
+                    .inner_margin(Margin::symmetric(14.0, 8.0))
+                    .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 30)))
                     .show(ui, |ui| {
-                        ui.set_max_width(320.0);
-                        
-                        // Header
-                        ui.heading(RichText::new("Welcome Back!").size(24.0).color(egui::Color32::WHITE));
-                        ui.label(RichText::new("We're so excited to see you again!").color(crate::ui::theme::colors::TEXT_MUTED));
-                        ui.add_space(20.0);
-                        
-                        // Inputs styling
-                        let input_frame = |ui: &mut egui::Ui, label: &str, value: &mut String, password: bool, hint: &str| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(label.to_uppercase()).size(12.0).strong().color(crate::ui::theme::colors::TEXT_MUTED));
-                            });
-                            ui.add_space(4.0);
-                            
-                            let edit = egui::TextEdit::singleline(value)
-                                .password(password)
-                                .hint_text(hint)
-                                .desired_width(f32::INFINITY)
-                                .margin(egui::vec2(10.0, 10.0)); // Padding inside input
-                                
-                            ui.add(edit);
-                            ui.add_space(16.0);
-                        };
-
-                        input_frame(ui, "Server Address", &mut self.server_addr, false, "127.0.0.1:8080");
-                        input_frame(ui, "Username", &mut self.username, false, "Enter your username");
-                        input_frame(ui, "Password", &mut self.password, true, "Enter your password");
-                        
-                        ui.add_space(10.0);
-
-                        // Login Button (Primary)
-                        let login_btn = Button::new(RichText::new("Log In").size(16.0).color(egui::Color32::WHITE))
-                            .fill(crate::ui::theme::colors::PRIMARY)
-                            .rounding(4.0)
-                            .min_size(Vec2::new(f32::INFINITY, 44.0));
-                        
-                        if ui.add(login_btn).clicked() {
-                            if let Ok(client) = SignalingClient::connect(&self.server_addr) {
-                                let _ = client.login(&self.username, &self.password);
-                                self.pending_client = Some(client);
-                                self.pending_action = Some(PendingAction::Login);
-                                self.status_message = Some("Logging in...".to_string());
-                            } else {
-                                self.status_message = Some("Could not connect to signaling server".to_string());
-                            }
-                        }
-                        
-                        ui.add_space(10.0);
-                        
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Need an account?").color(crate::ui::theme::colors::TEXT_MUTED));
-                            if ui.link("Register").clicked() {
+                            ui.label(RichText::new("RoomRTC").strong().color(colors::TEXT_PRIMARY));
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new("Reuniones nitidas y rapidas")
+                                    .size(13.0)
+                                    .color(colors::TEXT_MUTED),
+                            );
+                        });
+                    });
+
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("Bienvenido de nuevo")
+                        .size(30.0)
+                        .strong()
+                        .color(colors::TEXT_PRIMARY),
+                );
+                ui.label(
+                    RichText::new("Organiza tus llamadas y comparte tu sala en segundos.")
+                        .size(16.0)
+                        .color(colors::TEXT_MUTED),
+                );
+
+                ui.add_space(22.0);
+
+                // Contenedor principal "glass"
+                egui::Frame::none()
+                    .fill(Color32::from_rgba_unmultiplied(16, 17, 24, 220))
+                    .rounding(Rounding::same(18.0))
+                    .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 26)))
+                    .inner_margin(Margin::same(20.0))
+                    .show(ui, |ui| {
+                        ui.set_width(520.0);
+
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 14.0;
+
+                            ui.label(
+                                RichText::new("Datos de acceso")
+                                    .size(18.0)
+                                    .color(colors::TEXT_PRIMARY)
+                                    .strong(),
+                            );
+                            ui.separator();
+
+                            // Campo de servidor
+                            ui.label(
+                                RichText::new("Servidor")
+                                    .size(13.0)
+                                    .color(colors::TEXT_MUTED)
+                                    .strong(),
+                            );
+                            egui::Frame::none()
+                                .fill(colors::BACKGROUND_TERTIARY)
+                                .rounding(Rounding::same(10.0))
+                                .stroke(Stroke::new(1.0, colors::BORDER))
+                                .inner_margin(Margin::symmetric(12.0, 10.0))
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.server_addr)
+                                            .desired_width(f32::INFINITY)
+                                            .hint_text("wss://servidor:puerto")
+                                            .frame(false)
+                                            .font(TextStyle::Body),
+                                    );
+                                });
+
+                            // Campo de usuario
+                            ui.label(
+                                RichText::new("Usuario")
+                                    .size(13.0)
+                                    .color(colors::TEXT_MUTED)
+                                    .strong(),
+                            );
+                            egui::Frame::none()
+                                .fill(colors::BACKGROUND_TERTIARY)
+                                .rounding(Rounding::same(10.0))
+                                .stroke(Stroke::new(1.0, colors::BORDER))
+                                .inner_margin(Margin::symmetric(12.0, 10.0))
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.username)
+                                            .desired_width(f32::INFINITY)
+                                            .hint_text("tu usuario")
+                                            .frame(false),
+                                    );
+                                });
+
+                            // Campo de contrasena
+                            ui.label(
+                                RichText::new("Contrasena")
+                                    .size(13.0)
+                                    .color(colors::TEXT_MUTED)
+                                    .strong(),
+                            );
+                            egui::Frame::none()
+                                .fill(colors::BACKGROUND_TERTIARY)
+                                .rounding(Rounding::same(10.0))
+                                .stroke(Stroke::new(1.0, colors::BORDER))
+                                .inner_margin(Margin::symmetric(12.0, 10.0))
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.password)
+                                            .desired_width(f32::INFINITY)
+                                            .password(true)
+                                            .frame(false)
+                                            .hint_text("********"),
+                                    );
+                                });
+
+                            ui.add_space(4.0);
+
+                            // Boton de accion
+                            let login_btn = Button::new(
+                                RichText::new("Ingresar")
+                                    .size(17.0)
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(colors::PRIMARY)
+                            .min_size(Vec2::new(ui.available_width(), 46.0))
+                            .rounding(12.0);
+
+                            if ui.add(login_btn).clicked() {
                                 if let Ok(client) = SignalingClient::connect(&self.server_addr) {
-                                    let _ = client.register(&self.username, &self.password);
+                                    let _ = client.login(&self.username, &self.password);
                                     self.pending_client = Some(client);
-                                    self.pending_action = Some(PendingAction::RegisterThenLogin);
-                                    self.status_message = Some("Registering...".to_string());
+                                    self.pending_action = Some(PendingAction::Login);
+                                    self.status_message = Some("Logging in...".into());
                                 } else {
-                                    self.status_message = Some("Could not connect to server".to_string());
+                                    self.status_message = Some("Cannot connect to server".into());
                                 }
+                            }
+
+                            // Enlace de registro y estado
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Eres nuevo?")
+                                        .color(colors::TEXT_MUTED)
+                                        .size(13.0),
+                                );
+                                if ui
+                                    .add(
+                                        egui::Label::new(
+                                            RichText::new("Crear cuenta")
+                                                .underline()
+                                                .color(colors::PRIMARY)
+                                                .size(13.5),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    )
+                                    .clicked()
+                                {
+                                    if let Ok(client) = SignalingClient::connect(&self.server_addr) {
+                                        let _ = client.register(&self.username, &self.password);
+                                        self.pending_client = Some(client);
+                                        self.pending_action = Some(PendingAction::RegisterThenLogin);
+                                        self.status_message = Some("Registering...".into());
+                                    } else {
+                                        self.status_message = Some("Cannot connect to server".into());
+                                    }
+                                }
+                            });
+
+                            if let Some(status) = &self.status_message {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new(status)
+                                        .color(Color32::LIGHT_RED)
+                                        .size(14.0),
+                                );
                             }
                         });
                     });
 
-                if let Some(status) = &self.status_message {
-                    ui.add_space(20.0);
-                    ui.label(RichText::new(status).color(crate::ui::theme::colors::DANGER));
-                }
+                ui.add_space(32.0);
             });
         });
 

@@ -3,8 +3,8 @@ use eframe::egui::{self, Color32, Visuals, Style, Rounding, Stroke, Shadow, Font
 pub mod colors {
     use eframe::egui::Color32;
 
-    pub const BACKGROUND: Color32 = Color32::from_rgb(54, 57, 63);       // #36393f
-    pub const BACKGROUND_SECONDARY: Color32 = Color32::from_rgb(47, 49, 54); // #2f3136
+    pub const BACKGROUND: Color32 = Color32::from_rgb(54, 57, 63);       // rgba(20, 20, 32, 1)
+    pub const BACKGROUND_SECONDARY: Color32 = Color32::from_rgb(47, 49, 54); // #121213ff
     pub const BACKGROUND_TERTIARY: Color32 = Color32::from_rgb(32, 34, 37);  // #202225
     
     pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(220, 221, 222);      // #dcddde

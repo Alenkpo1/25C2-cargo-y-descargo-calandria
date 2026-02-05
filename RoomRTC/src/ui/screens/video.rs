@@ -31,6 +31,7 @@ pub struct VideoCall {
     last_remote_seen: Option<std::time::Instant>,
     audio_started: bool,
     audio_worker: Option<WorkerAudio>,
+    show_stats: bool,
 }
 
 impl VideoCall {
@@ -51,6 +52,7 @@ impl VideoCall {
             last_remote_seen: None,
             audio_started: false,
             audio_worker: None,
+            show_stats: false,
         }
     }
 
@@ -228,6 +230,45 @@ impl VideoCall {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // Stats Overlay
+            if self.show_stats {
+                egui::Window::new("stats_overlay")
+                    .anchor(Align2::LEFT_TOP, egui::vec2(20.0, 80.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .frame(egui::Frame::none().fill(Color32::from_black_alpha(180)).rounding(8.0).inner_margin(12.0))
+                    .show(ctx, |ui| {
+                         ui.label(RichText::new("🔌 Network Statistics").strong().color(Color32::WHITE));
+                         ui.add_space(4.0);
+                         
+                         if let Some(metrics) = &self.quality_metrics {
+                             let text_color = crate::ui::theme::colors::TEXT_PRIMARY;
+                             ui.style_mut().override_text_style = Some(egui::TextStyle::Body);
+                             
+                             egui::Grid::new("stats_grid").num_columns(2).spacing(egui::vec2(20.0, 4.0)).show(ui, |ui| {
+                                 ui.label(RichText::new("Bitrate:").color(crate::ui::theme::colors::TEXT_MUTED));
+                                 ui.label(RichText::new(format!("{:.0} kbps", metrics.bitrate_kbps)).color(text_color));
+                                 ui.end_row();
+                                 
+                                 ui.label(RichText::new("Packet Loss:").color(crate::ui::theme::colors::TEXT_MUTED));
+                                 let loss_color = if metrics.packet_loss_pct > 5.0 { crate::ui::theme::colors::DANGER } else { crate::ui::theme::colors::SUCCESS };
+                                 ui.label(RichText::new(format!("{:.2}%", metrics.packet_loss_pct)).color(loss_color));
+                                 ui.end_row();
+                                 
+                                 ui.label(RichText::new("Jitter:").color(crate::ui::theme::colors::TEXT_MUTED));
+                                 ui.label(RichText::new(format!("{:.1} ms", metrics.jitter_ms)).color(text_color));
+                                 ui.end_row();
+                                 
+                                 ui.label(RichText::new("RTT (est):").color(crate::ui::theme::colors::TEXT_MUTED));
+                                 ui.label(RichText::new(format!("{} ms", metrics.since_last_ms.unwrap_or(0))).color(text_color));
+                                 ui.end_row();
+                             });
+                         } else {
+                             ui.label(RichText::new("Gathering metrics...").italics().color(crate::ui::theme::colors::TEXT_MUTED));
+                         }
+                    });
+            }
+
             // Header (Status overlay)
             if let Some(status) = &self.status_message {
                 ui.colored_label(crate::ui::theme::colors::DANGER, status);
@@ -291,7 +332,7 @@ impl VideoCall {
                                 
                                 // Mute Button
                                 let is_muted = self.audio_worker.as_ref().map(|w| w.is_muted()).unwrap_or(false);
-                                let (mute_icon, mute_color) = if is_muted { 
+                                let (mute_icon, _mute_color) = if is_muted { 
                                     ("🔇", crate::ui::theme::colors::DANGER) 
                                 } else { 
                                     ("🎤", crate::ui::theme::colors::TEXT_PRIMARY) 
@@ -311,13 +352,25 @@ impl VideoCall {
                                 
                                 ui.add_space(20.0);
                                 
-                                // Video Toggle (Placeholder for now)
+                                // Video Toggle (Placeholder)
                                 let video_btn = Button::new(RichText::new("📷").size(24.0))
                                     .fill(crate::ui::theme::colors::BACKGROUND)
                                     .rounding(30.0)
                                     .min_size(Vec2::new(50.0, 50.0));
                                 ui.add(video_btn).on_hover_text("Toggle Video");
                                 
+                                ui.add_space(20.0);
+
+                                // Stats Toggle Button
+                                let stats_icon = "📊";
+                                let stats_btn = Button::new(RichText::new(stats_icon).size(24.0))
+                                    .fill(if self.show_stats { crate::ui::theme::colors::PRIMARY } else { crate::ui::theme::colors::BACKGROUND })
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(50.0, 50.0));
+                                if ui.add(stats_btn).on_hover_text("Toggle Statistics").clicked() {
+                                    self.show_stats = !self.show_stats;
+                                }
+
                                 ui.add_space(20.0);
 
                                 // Hangup Button

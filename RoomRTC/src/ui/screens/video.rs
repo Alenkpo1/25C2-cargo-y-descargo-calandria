@@ -159,6 +159,10 @@ impl VideoCall {
                         let (socket, context) = client.audio_params();
                         match WorkerAudio::start(socket, context) {
                             Ok(worker) => {
+                                // Connect audio incoming sender to client listener
+                                let sender = worker.incoming_sender();
+                                client.set_audio_incoming(sender);
+                                
                                 self.audio_worker = Some(worker);
                                 self.audio_started = true;
                             }

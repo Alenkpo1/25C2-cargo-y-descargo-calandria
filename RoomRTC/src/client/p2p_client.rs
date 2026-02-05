@@ -22,6 +22,7 @@ pub struct P2PClient {
     listener_handle: Option<JoinHandle<()>>,
     media_worker: Option<WorkerMedia>,
     media_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
+    audio_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
     media_metrics: Option<Arc<Mutex<MediaMetrics>>>,
 }
 
@@ -34,6 +35,7 @@ impl P2PClient {
             listener_handle: None,
             media_worker: None,
             media_incoming: Arc::new(Mutex::new(None)),
+            audio_incoming: Arc::new(Mutex::new(None)),
             media_metrics: None,
         })
     }
@@ -152,9 +154,19 @@ impl P2PClient {
         (socket, context)
     }
 
+    /// Sets the audio incoming sender (called from VideoCall after WorkerAudio is created).
+    pub fn set_audio_incoming(&self, sender: SyncSender<Vec<u8>>) {
+        if let Ok(mut guard) = self.audio_incoming.lock() {
+            *guard = Some(sender);
+        }
+    }
+
     pub fn stop_media(&mut self) {
         self.media_worker.take();
         if let Ok(mut guard) = self.media_incoming.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.audio_incoming.lock() {
             *guard = None;
         }
         self.media_metrics = None;
@@ -184,6 +196,7 @@ impl P2PClient {
         let callback = Arc::new(on_msg);
         let thread_callback = Arc::clone(&callback);
         let media_input = Arc::clone(&self.media_incoming);
+        let audio_input = Arc::clone(&self.audio_incoming);
 
         let srtp_context = self.peer_connection.lock().unwrap().srtp_context();
 
@@ -241,10 +254,34 @@ impl P2PClient {
                         if is_rtcp_bye {
                             thread_callback("CALL_END".to_string());
                         }
-                        if let Ok(lock) = media_input.lock()
-                            && let Some(tx) = lock.as_ref()
-                        {
-                            let _ = tx.send(bytes);
+                        
+                        // Route RTP packets by SSRC: 1000 = video, 2000 = audio
+                        if bytes.len() >= 12 {
+                            let (header, _) = RtpHeader::read_bytes(&bytes);
+                            let ssrc = header.get_ssrc();
+                            
+                            if ssrc == 2000 {
+                                // Audio packet
+                                if let Ok(lock) = audio_input.lock()
+                                    && let Some(tx) = lock.as_ref()
+                                {
+                                    let _ = tx.send(bytes);
+                                }
+                            } else {
+                                // Video packet (or default)
+                                if let Ok(lock) = media_input.lock()
+                                    && let Some(tx) = lock.as_ref()
+                                {
+                                    let _ = tx.send(bytes);
+                                }
+                            }
+                        } else {
+                            // Fallback: short packets go to video
+                            if let Ok(lock) = media_input.lock()
+                                && let Some(tx) = lock.as_ref()
+                            {
+                                let _ = tx.send(bytes);
+                            }
                         }
                     }
                 }

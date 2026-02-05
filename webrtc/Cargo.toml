@@ -13,6 +13,7 @@ hex = "0.4"
 udp-dtls = "0.1.0"
 cpal = "0.15"
 audiopus = "0.3.0-rc.0"
+rodio = "0.17"
 
 [lib]
 name = "room_rtc"

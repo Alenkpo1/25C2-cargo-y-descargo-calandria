@@ -103,7 +103,7 @@ impl WorkerAudio {
                         while buffer.len() >= OPUS_FRAME_SIZE {
                             let frame: Vec<i16> = buffer.drain(..OPUS_FRAME_SIZE).collect();
                             if let Ok(encoded) = encoder.encode(&frame) {
-                                eprintln!("[AUDIO] Encoded {} bytes", encoded.len());
+                                // eprintln!("[AUDIO] Encoded {} bytes", encoded.len());
                                 let _ = tx_opus_encoded.try_send(encoded);
                             }
                         }
@@ -154,7 +154,7 @@ impl WorkerAudio {
 
                         if let Ok(socket) = socket_for_rtp.lock() {
                             let _ = socket.send(&packet_bytes);
-                            eprintln!("[AUDIO] Sent RTP packet: seq={}, ts={}, size={}", sequence, timestamp, packet_bytes.len());
+                            // eprintln!("[AUDIO] Sent RTP packet: seq={}, ts={}, size={}", sequence, timestamp, packet_bytes.len());
                         }
 
                         sequence = sequence.wrapping_add(1);
@@ -181,7 +181,7 @@ impl WorkerAudio {
             while running_dec.load(Ordering::Relaxed) {
                 match rx_incoming.recv() {
                     Ok(rtp_data) => {
-                        eprintln!("[AUDIO] Decoder received RTP packet: size={}", rtp_data.len());
+                        // eprintln!("[AUDIO] Decoder received RTP packet: size={}", rtp_data.len());
                         if rtp_data.len() < 12 {
                             continue;
                         }
@@ -208,7 +208,7 @@ impl WorkerAudio {
                         };
 
                         if let Ok(pcm) = decoder.decode(&opus_data) {
-                            eprintln!("[AUDIO] Decoded {} PCM samples", pcm.len());
+                            // eprintln!("[AUDIO] Decoded {} PCM samples", pcm.len());
                             let _ = tx_pcm_playback.try_send(pcm);
                         }
                     }

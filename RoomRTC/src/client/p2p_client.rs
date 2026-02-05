@@ -262,8 +262,8 @@ impl P2PClient {
                             
                             if ssrc == 2000 {
                                 // Audio packet
-                                eprintln!("[LISTENER] Routing audio packet: SSRC={}, seq={}, size={}", 
-                                    ssrc, header.get_sequence_number(), bytes.len());
+                                // eprintln!("[LISTENER] Routing audio packet: SSRC={}, seq={}, size={}", 
+                                //     ssrc, header.get_sequence_number(), bytes.len());
                                 if let Ok(lock) = audio_input.lock()
                                     && let Some(tx) = lock.as_ref()
                                 {

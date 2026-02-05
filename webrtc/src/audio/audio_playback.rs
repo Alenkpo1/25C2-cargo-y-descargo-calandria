@@ -47,16 +47,22 @@ impl Iterator for ChannelSource {
         if self.position >= self.current_buffer.len() {
             if let Ok(guard) = self.rx.lock() {
                 // Try to receive without blocking
-                if let Ok(new_samples) = guard.try_recv() {
-                    // Log occasionally to confirm data flow
-                    if new_samples.len() > 0 && rand::random::<u8>() < 5 { // ~2% chance to log per buffer
-                        eprintln!("[PLAYBACK-RODIO] Consuming buffer of {} samples", new_samples.len());
+                match guard.try_recv() {
+                    Ok(new_samples) => {
+                        eprintln!("[PLAYBACK-RODIO] Got {} samples", new_samples.len());
+                        self.current_buffer = new_samples;
+                        self.position = 0;
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                         if rand::random::<u8>() < 2 { // very low probability
+                             eprintln!("[PLAYBACK-RODIO] Buffer empty");
+                         }
+                         return Some(0);
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        eprintln!("[PLAYBACK-RODIO] Source Disconnected!");
+                        return Some(0);
                     }
-                    self.current_buffer = new_samples;
-                    self.position = 0;
-                } else {
-                    // No data available, return silence
-                    return Some(0);
                 }
             } else {
                 return Some(0);

@@ -57,14 +57,29 @@ impl JitterBuffer {
             }
         }
         let ts = min_timestamp?;
+        
+        // Check for stale incomplete frames and deliver them anyway
+        let stale_incomplete: Vec<u32> = self.frames.iter()
+            .filter(|(_, frame)| !frame.is_complete() && frame.is_stale())
+            .map(|(&ts, _)| ts)
+            .collect();
+        
+        for stale_ts in stale_incomplete {
+            if !Self::is_timestamp_newer(stale_ts, ts) {
+                // Deliver stale frame even if incomplete
+                self.last_timestamp = Some(stale_ts);
+                return self.frames.remove(&stale_ts);
+            }
+        }
+        
         let has_incomplete_older = self.frames.iter().any(|(&older_ts, frame)| {
-            !frame.is_complete() && !Self::is_timestamp_newer(older_ts, ts)
+            !frame.is_complete() && !frame.is_stale() && !Self::is_timestamp_newer(older_ts, ts)
         });
         if has_incomplete_older {
             return None;
         }
         if let Some(frame) = self.frames.get(&ts) {
-            if frame.is_complete() {
+            if frame.is_complete() || frame.is_stale() {
                 self.last_timestamp = Some(ts);
                 return self.frames.remove(&ts);
             }

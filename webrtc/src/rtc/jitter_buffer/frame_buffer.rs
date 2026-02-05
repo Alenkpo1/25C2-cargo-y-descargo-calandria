@@ -1,8 +1,10 @@
 use crate::protocols::rtp::rtp_packet::RtpPacket;
+use std::time::Instant;
 
 pub struct FrameBuffer {
     packets: Vec<RtpPacket>,
     marker_received: bool,
+    created_at: Instant,
 }
 impl Default for FrameBuffer {
     fn default() -> Self {
@@ -14,6 +16,7 @@ impl FrameBuffer {
         FrameBuffer {
             packets: Vec::new(),
             marker_received: false,
+            created_at: Instant::now(),
         }
     }
     pub fn push(&mut self, packet: RtpPacket) {
@@ -24,6 +27,10 @@ impl FrameBuffer {
     }
     pub fn is_complete(&self) -> bool {
         self.marker_received && !self.packets.is_empty()
+    }
+    /// Returns true if the frame has been waiting too long (>150ms)
+    pub fn is_stale(&self) -> bool {
+        self.created_at.elapsed().as_millis() > 150 && !self.packets.is_empty()
     }
     pub fn sort_by_sequence(&mut self) {
         self.packets

@@ -2,9 +2,13 @@ use crate::protocols::rtp::rtp_packet::RtpPacket;
 use crate::rtc::jitter_buffer::frame_buffer::FrameBuffer;
 use std::collections::HashMap;
 
+// Video clock rate is typically 90000 Hz
+const TIMESTAMP_JUMP_THRESHOLD: u32 = 90_000; // 1 second worth of timestamps
+
 pub struct JitterBuffer {
     frames: HashMap<u32, FrameBuffer>,
     last_timestamp: Option<u32>,
+    last_pushed_timestamp: Option<u32>,
 }
 impl Default for JitterBuffer {
     fn default() -> Self {
@@ -16,11 +20,31 @@ impl JitterBuffer {
         JitterBuffer {
             frames: HashMap::new(),
             last_timestamp: None,
+            last_pushed_timestamp: None,
         }
     }
     pub fn push(&mut self, packet: RtpPacket) {
-        let timestap = packet.get_timestamp();
-        let frame = self.frames.entry(timestap).or_default();
+        let timestamp = packet.get_timestamp();
+        
+        // Detect large timestamp jumps (reconnection scenario)
+        if let Some(last_ts) = self.last_pushed_timestamp {
+            let forward_diff = timestamp.wrapping_sub(last_ts);
+            let backward_diff = last_ts.wrapping_sub(timestamp);
+            
+            // If timestamp jumped forward by more than 1 second, clear old frames
+            if forward_diff > TIMESTAMP_JUMP_THRESHOLD && forward_diff < 0x8000_0000 {
+                self.frames.clear();
+                self.last_timestamp = None;
+            }
+            // If timestamp is much older (backward jump), also clear
+            else if backward_diff > TIMESTAMP_JUMP_THRESHOLD && backward_diff < 0x8000_0000 {
+                self.frames.clear();
+                self.last_timestamp = None;
+            }
+        }
+        
+        self.last_pushed_timestamp = Some(timestamp);
+        let frame = self.frames.entry(timestamp).or_default();
         frame.push(packet);
     }
 

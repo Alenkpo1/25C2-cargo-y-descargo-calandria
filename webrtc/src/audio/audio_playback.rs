@@ -48,6 +48,10 @@ impl Iterator for ChannelSource {
             if let Ok(guard) = self.rx.lock() {
                 // Try to receive without blocking
                 if let Ok(new_samples) = guard.try_recv() {
+                    // Log occasionally to confirm data flow
+                    if new_samples.len() > 0 && rand::random::<u8>() < 5 { // ~2% chance to log per buffer
+                        eprintln!("[PLAYBACK-RODIO] Consuming buffer of {} samples", new_samples.len());
+                    }
                     self.current_buffer = new_samples;
                     self.position = 0;
                 } else {
@@ -62,7 +66,7 @@ impl Iterator for ChannelSource {
         // Return next sample
         if self.position < self.current_buffer.len() {
             let sample = self.current_buffer[self.position];
-            self.position += 1;
+             self.position += 1;
             Some(sample)
         } else {
             Some(0)

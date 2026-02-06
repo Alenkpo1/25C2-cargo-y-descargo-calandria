@@ -257,11 +257,11 @@ impl VideoCall {
                                                                             println!("DEBUG: Sender Thread: Sent {} bytes...", total_sent);
                                                                         }
 
-                                                                        // Send Chunk on Stream 0 (Fallback due to stream limit)
-                                                                        let mut retries = 0;
-                                                                        loop {
-                                                                            match client.send_sctp_data(0, chunk.to_vec()) {
-                                                                                Ok(_) => {
+                                // Send Chunk on Stream 2 (data channel for file chunks)
+                                let mut retries = 0;
+                                loop {
+                                    match client.send_sctp_data(2, chunk.to_vec()) {
+                                        Ok(_) => {
                                                                                     if let Ok(guard) = sctp_inc.lock() {
                                                                                         if let Some(tx) = guard.as_ref() {
                                                                                             let len_bytes = n.to_le_bytes().to_vec();
@@ -370,8 +370,8 @@ impl VideoCall {
                                      });
                                      self.status_message = Some("Sent File Offer...".to_string());
                                  }
-                             } else if stream == 2 {
-                                 // File data stream
+                             } else if stream == 2 || stream == 0 {
+                                 // File data stream (primary 2, legacy 0)
                                  if let Some(inc) = &mut self.incoming_file {
                                      if let Some(f) = &mut inc.file_handle {
                                          if let Err(e) = f.write_all(&payload) {

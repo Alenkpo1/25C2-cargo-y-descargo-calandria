@@ -243,42 +243,47 @@ impl VideoCall {
                                                              let sctp_inc = client.sctp_incoming.clone();
                                                              thread::spawn(move || {
                                                                  if let Ok(mut file) = std::fs::File::open(&path) {
-                                                                     let mut buffer = [0u8; 16384]; // 16KB chunks
-                                                                     use std::io::Read;
-                                                                     loop {
-                                                                         match file.read(&mut buffer) {
-                                                                             Ok(0) => break, // EOF
-                                                                             Ok(n) => {
-                                                                                 // Send Chunk (Stream 2)
-                                                                                 let mut retries = 0;
-                                                                                 loop {
-                                                                                     match client.send_sctp_data(2, buffer[..n].to_vec()) {
-                                                                                         Ok(_) => {
-                                                                                             if let Ok(guard) = sctp_inc.lock() {
-                                                                                                 if let Some(tx) = guard.as_ref() {
-                                                                                                     let len_bytes = n.to_le_bytes().to_vec();
-                                                                                                     let _ = tx.send((998, len_bytes));
-                                                                                                 }
-                                                                                             }
-                                                                                             break;
-                                                                                         }
-                                                                                         Err(e) if e.contains("BufferFull") => {
-                                                                                             retries += 1;
-                                                                                             if retries > 100 {
-                                                                                                 eprintln!("Upload error: BufferFull timeout");
-                                                                                                 break;
-                                                                                             }
-                                                                                             thread::sleep(std::time::Duration::from_millis(50));
-                                                                                         }
-                                                                                         Err(e) => {
-                                                                                             eprintln!("Upload error: {}", e);
-                                                                                             break;
-                                                                                         }
-                                                                                     }
-                                                                                 }
-                                                                             }
-                                                                             Err(_) => break,
-                                                                         }
+                                                                    let mut buffer = [0u8; 4096]; // 4KB chunks (Reduced from 16KB to improve reliability)
+                                                                    let mut total_sent = 0;
+                                                                    loop {
+                                                                        let n = file.read(&mut buffer).unwrap_or(0);
+                                                                        if n == 0 { break; }
+                                                                        
+                                                                        let chunk = &buffer[..n];
+                                                                        
+                                                                        // Log progress every ~500KB
+                                                                        if (total_sent / 500_000) != ((total_sent + n) / 500_000) {
+                                                                            println!("DEBUG: Sender Thread: Sent {} bytes...", total_sent);
+                                                                        }
+
+                                                                        // Send Chunk on Stream 2
+                                                                        let mut retries = 0;
+                                                                        loop {
+                                                                            match client.send_sctp_data(2, chunk.to_vec()) {
+                                                                                Ok(_) => {
+                                                                                    if let Ok(guard) = sctp_inc.lock() {
+                                                                                        if let Some(tx) = guard.as_ref() {
+                                                                                            let len_bytes = n.to_le_bytes().to_vec();
+                                                                                            let _ = tx.send((998, len_bytes));
+                                                                                        }
+                                                                                    }
+                                                                                    total_sent += n;
+                                                                                    break;
+                                                                                }
+                                                                                Err(e) if e.contains("BufferFull") => {
+                                                                                    retries += 1;
+                                                                                    if retries > 200 { // 10 seconds (50ms * 200)
+                                                                                        eprintln!("DEBUG: Upload error: BufferFull timeout after {} bytes", total_sent);
+                                                                                        break;
+                                                                                    }
+                                                                                    thread::sleep(std::time::Duration::from_millis(50));
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    eprintln!("DEBUG: Upload error: {}", e);
+                                                                                    break;
+                                                                                }
+                                                                            }
+                                                                        }
                                                                      }
                                                                      // Send EOF
                                                                      let eof = FileTransferMessage::Eof;

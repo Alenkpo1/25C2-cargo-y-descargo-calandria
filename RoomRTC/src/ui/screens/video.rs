@@ -208,7 +208,7 @@ impl VideoCall {
                 if let Some(client) = self.client.as_ref() {
                     // Initialize SCTP RX
                     if self.sctp_rx.is_none() {
-                        let (tx, rx) = mpsc::sync_channel(100);
+                        let (tx, rx) = mpsc::sync_channel(10000);
                         client.set_sctp_incoming(tx);
                         self.sctp_rx = Some(rx);
                     }

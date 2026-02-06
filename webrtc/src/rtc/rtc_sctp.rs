@@ -134,6 +134,10 @@ impl SctpAssociation {
         Ok(())
     }
 
+    pub fn drive(&mut self) {
+        self.pump_association(Instant::now());
+    }
+
     pub fn recv_data(&mut self) -> Option<(u16, Vec<u8>)> {
         // Events are handled in handle_input
         self.incoming_data.pop_front()

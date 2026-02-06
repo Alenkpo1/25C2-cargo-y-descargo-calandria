@@ -175,6 +175,9 @@ impl P2PClient {
 
                         // B. Poll SCTP Output -> Buffer it
                         if let Some(sctp) = pc.sctp_association.as_mut() {
+                            // NEW: Drive timers to ensure SACKs/Heartbeats are sent even if no data arrives
+                            sctp.drive();
+                            
                             while let Some(out_packet) = sctp.poll_output() {
                                 pending_outbound.push_back(out_packet);
                             }

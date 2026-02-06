@@ -110,7 +110,7 @@ impl SctpAssociation {
                     Ok(n) => {
                         offset += n;
                         if n == 0 {
-                            return Err("SCTP stream write returned 0 bytes (buffer full?)".to_string());
+                            return Err("BufferFull".to_string());
                         }
                     }
                     Err(e) => {

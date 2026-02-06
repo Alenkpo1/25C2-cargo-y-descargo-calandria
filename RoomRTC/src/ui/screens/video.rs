@@ -250,16 +250,32 @@ impl VideoCall {
                                                                              Ok(0) => break, // EOF
                                                                              Ok(n) => {
                                                                                  // Send Chunk (Stream 2)
-                                                                                 let _ = client.send_sctp_data(2, buffer[..n].to_vec());
-                                                                                 
-                                                                                 // Notify Local Progress (Stream 998)
-                                                                                 if let Ok(guard) = sctp_inc.lock() {
-                                                                                     if let Some(tx) = guard.as_ref() {
-                                                                                         let len_bytes = n.to_le_bytes().to_vec();
-                                                                                         let _ = tx.send((998, len_bytes));
+                                                                                 let mut retries = 0;
+                                                                                 loop {
+                                                                                     match client.send_sctp_data(2, buffer[..n].to_vec()) {
+                                                                                         Ok(_) => {
+                                                                                             if let Ok(guard) = sctp_inc.lock() {
+                                                                                                 if let Some(tx) = guard.as_ref() {
+                                                                                                     let len_bytes = n.to_le_bytes().to_vec();
+                                                                                                     let _ = tx.send((998, len_bytes));
+                                                                                                 }
+                                                                                             }
+                                                                                             break;
+                                                                                         }
+                                                                                         Err(e) if e.contains("BufferFull") => {
+                                                                                             retries += 1;
+                                                                                             if retries > 100 {
+                                                                                                 eprintln!("Upload error: BufferFull timeout");
+                                                                                                 break;
+                                                                                             }
+                                                                                             thread::sleep(std::time::Duration::from_millis(50));
+                                                                                         }
+                                                                                         Err(e) => {
+                                                                                             eprintln!("Upload error: {}", e);
+                                                                                             break;
+                                                                                         }
                                                                                      }
                                                                                  }
-                                                                                 thread::sleep(std::time::Duration::from_millis(2));
                                                                              }
                                                                              Err(_) => break,
                                                                          }

@@ -22,8 +22,12 @@ impl SctpAssociation {
         // Minimal endpoint configuration for experimentation.
         let endpoint_config = Arc::new(EndpointConfig::default());
 
-        let server_config = is_server
-            .then(|| Arc::new(ServerConfig::default()));
+        let server_config = is_server.then(|| {
+            let mut sc = ServerConfig::default();
+            sc.transport.max_inbound_streams = 16;
+            sc.transport.max_initial_outgoing_streams = 16;
+            Arc::new(sc)
+        });
 
         let endpoint = Endpoint::new(endpoint_config, server_config);
 
@@ -40,7 +44,9 @@ impl SctpAssociation {
     pub fn establish(&mut self) {
         if !self.is_server {
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
-            let client_config = ClientConfig::default();
+            let mut client_config = ClientConfig::default();
+            client_config.transport.max_inbound_streams = 16;
+            client_config.transport.max_initial_outgoing_streams = 16;
 
             if let Ok((handle, association)) = self.endpoint.connect(client_config, addr) {
                 self.association_handle = Some(handle);

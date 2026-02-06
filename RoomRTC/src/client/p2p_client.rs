@@ -10,6 +10,7 @@ use room_rtc::worker_thread::media_metrics::{CallMetricsSnapshot, MediaMetrics};
 use room_rtc::worker_thread::worker_media::{VideoParams, WorkerMedia};
 use room_rtc::crypto::srtp::SrtpContext;
 use room_rtc::rtc::socket::peer_socket::PeerSocket;
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
@@ -42,20 +43,6 @@ impl Clone for P2PClient {
 }
 
 impl P2PClient {
-    fn write_dtls_with_retry(pc: &mut RtcPeerConnection, data: &[u8]) {
-        let mut backoff_ms = 2u64;
-        loop {
-            match pc.dtls_write(data) {
-                Ok(_) => return,
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                    backoff_ms = (backoff_ms * 2).min(200); // cap backoff
-                    continue;
-                }
-                Err(_) => return, // drop on other errors (e.g., connection closed)
-            }
-        }
-    }
     pub fn new(role: PeerConnectionRole) -> Result<Self, PeerConnectionError> {
         let peer_connection = Arc::new(Mutex::new(RtcPeerConnection::new(None, role)?));
 
@@ -155,52 +142,83 @@ impl P2PClient {
 
             // 5. Start SCTP Pump Loop
             println!("Connection Thread: Entering SCTP Pump Loop...");
+            
+            // Queue for packets that couldn't be sent immediately due to socket blocking
+            let mut pending_outbound: VecDeque<Vec<u8>> = VecDeque::new();
+
             loop {
                 thread::sleep(Duration::from_millis(1));
                 
-                let mut pc = pc_clone.lock().unwrap();
-                if pc.sctp_association.is_none() || !pc.has_dtls_session() {
+                // --- SCOPE for Mutex Lock ---
+                let mut incoming: Vec<(u16, Vec<u8>)> = Vec::new();
+                let mut keep_running = true;
+                
+                {
+                    let mut pc = pc_clone.lock().unwrap();
+                    if pc.sctp_association.is_none() || !pc.has_dtls_session() {
+                        keep_running = false;
+                    } else {
+                        // A. Read from DTLS -> Feed SCTP
+                        let mut buf = [0u8; 8192]; // Bigger buffer
+                        match pc.dtls_read(&mut buf) {
+                             Ok(n) => {
+                                 let data = &buf[..n];
+                                 pc.sctp_association.as_mut().unwrap().handle_input(data);
+                             }
+                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                 // No data, continue
+                             }
+                             Err(_) => {
+                                 // DTLS error
+                             }
+                        }
+
+                        // B. Poll SCTP Output -> Buffer it
+                        if let Some(sctp) = pc.sctp_association.as_mut() {
+                            while let Some(out_packet) = sctp.poll_output() {
+                                pending_outbound.push_back(out_packet);
+                            }
+                            while let Some(pkt) = sctp.recv_data() {
+                                incoming.push(pkt);
+                            }
+                        }
+                    }
+                } // Mutex RELEASED here
+
+                if !keep_running {
                     break;
                 }
 
-                // A. Read from DTLS -> Feed SCTP
-                let mut buf = [0u8; 2048];
-                match pc.dtls_read(&mut buf) {
-                     Ok(n) => {
-                         let data = &buf[..n];
-                         pc.sctp_association.as_mut().unwrap().handle_input(data);
-                     }
-                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                         // No data, continue
-                     }
-                     Err(_) => {
-                         // DTLS error
-                     }
+                // C. Dispatch Incoming Messages (Not holding lock)
+                for (stream, payload) in incoming {
+                    if let Ok(guard) = sctp_extension.lock() {
+                        if let Some(tx) = guard.as_ref() {
+                            let _ = tx.send((stream, payload));
+                        }
+                    }
                 }
 
-                // B. Poll SCTP Output -> Write DTLS
-                if pc.sctp_association.is_some() {
-                    let mut outbound: Vec<Vec<u8>> = Vec::new();
-                    let mut incoming: Vec<(u16, Vec<u8>)> = Vec::new();
-                    {
-                        let sctp = pc.sctp_association.as_mut().unwrap();
-                        while let Some(out_packet) = sctp.poll_output() {
-                            outbound.push(out_packet);
-                        }
-                        while let Some(pkt) = sctp.recv_data() {
-                            incoming.push(pkt);
-                        }
-                    }
-
-                    for out_packet in outbound {
-                        Self::write_dtls_with_retry(&mut pc, &out_packet);
-                    }
-
-                    for (stream, payload) in incoming {
-                        if let Ok(guard) = sctp_extension.lock() {
-                            if let Some(tx) = guard.as_ref() {
-                                let _ = tx.send((stream, payload));
+                // D. Flush Pending Outbound (Acquiring lock only when needed)
+                let mut packets_sent = 0;
+                while let Some(packet) = pending_outbound.front() {
+                    let mut pc = pc_clone.lock().unwrap();
+                    match pc.dtls_write(packet) {
+                        Ok(_) => {
+                            pending_outbound.pop_front();
+                            packets_sent += 1;
+                            // Limit burst to prevent hogging the lock too long in one loop iteration?
+                            // Probably fine to keep going unless we want to be fair to the reader.
+                            if packets_sent > 10 {
+                                break; 
                             }
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            // Backend socket full, stop trying for this tick
+                            break;
+                        }
+                        Err(_) => {
+                            // Fatal error? Drop packet.
+                            pending_outbound.pop_front();
                         }
                     }
                 }
@@ -363,7 +381,7 @@ impl P2PClient {
                             let ssrc = header.get_ssrc();
                             
                             if ssrc == 2000 {
-                                // Audio packet
+                                 // Audio packet
                                 if let Ok(lock) = audio_input.lock() {
                                     if let Some(tx) = lock.as_ref() {
                                         let _ = tx.send(bytes);
@@ -412,22 +430,43 @@ impl P2PClient {
     }
     
     pub fn send_sctp_data(&self, stream: u16, payload: Vec<u8>) -> Result<(), String> {
-        let mut pc = self.peer_connection.lock().unwrap();
-        if let Some(sctp) = &mut pc.sctp_association {
-            sctp.send_data(stream, payload)?;
-            
-            // Trigger write immediately if possible
-            let mut outbound: Vec<Vec<u8>> = Vec::new();
-            while let Some(out) = sctp.poll_output() {
-                outbound.push(out);
+        // Step 1: Push data to SCTP engine
+        let mut outbound_queue = VecDeque::new();
+        {
+            let mut pc = self.peer_connection.lock().unwrap();
+            if let Some(sctp) = &mut pc.sctp_association {
+                sctp.send_data(stream, payload)?; // This queues inside SCTP struct
+                
+                // Drain immediate output from SCTP to our local queue
+                while let Some(out) = sctp.poll_output() {
+                    outbound_queue.push_back(out);
+                }
+            } else {
+                return Err("SCTP not initialized".to_string());
             }
-            for out in outbound {
-                Self::write_dtls_with_retry(&mut pc, &out);
-            }
-            Ok(())
-        } else {
-            Err("SCTP not initialized".to_string())
+        } // Lock released
+
+        // Step 2: Send chunks via DTLS with retry, RELEASING LOCK on block
+        while let Some(packet) = outbound_queue.pop_front() {
+             let mut backoff = 1;
+             loop {
+                 let mut pc = self.peer_connection.lock().unwrap();
+                 match pc.dtls_write(&packet) {
+                     Ok(_) => break, // Success, move to next packet
+                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                         // Backend full. Drop lock and wait.
+                         drop(pc);
+                         thread::sleep(Duration::from_millis(backoff));
+                         backoff = (backoff * 2).min(50);
+                     }
+                     Err(e) => {
+                         eprintln!("DTLS Write Error: {}", e);
+                         return Err(e.to_string());
+                     }
+                 }
+             }
         }
+        Ok(())
     }
     
     pub fn set_sctp_incoming(&self, sender: SyncSender<(u16, Vec<u8>)>) {

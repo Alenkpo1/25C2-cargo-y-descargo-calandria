@@ -212,7 +212,8 @@ impl SctpAssociation {
                         // We need to borrow assoc again to read.
                         // This is fine as we are in the main loop scope, not inside the if-let.
                         if let Some(assoc) = self.association.as_mut() {
-                             if let Ok(mut stream) = assoc.stream(id) {
+                             match assoc.stream(id) {
+                                Ok(mut stream) => {
                                   // Read all available chunks
                                   loop {
                                       match stream.read() {
@@ -233,6 +234,10 @@ impl SctpAssociation {
                                           break;
                                       }
                                   }
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Failed to get stream {}: {:?}", id, e);
+                                }
                              }
                         }
                         progressed = true;

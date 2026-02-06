@@ -12,6 +12,7 @@ use crate::rtc::socket::peer_socket_err::PeerSocketErr;
 
 pub use super::peer_connection_error::PeerConnectionError;
 use super::sdp_negotiation::{build_local_description, process_remote_sdp, validate_dtls_fingerprint};
+use crate::rtc::rtc_sctp::SctpAssociation;
 
 /// Defines the role assumed by the peer within the signaling flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,12 +22,11 @@ pub enum PeerConnectionRole {
 }
 
 impl PeerConnectionRole {
-    fn is_controlling(self) -> bool {
+    pub fn is_controlling(self) -> bool {
         matches!(self, Self::Controlling)
     }
 }
 
-/// WebRTC session manager that coordinates the socket and ICE agent.
 pub struct RtcPeerConnection {
     role: PeerConnectionRole,
     ice_agent: IceAgent,
@@ -40,10 +40,10 @@ pub struct RtcPeerConnection {
     dtls_session: Option<DtlsSession>,
     dtls_receiver: Option<Receiver<Vec<u8>>>,
     dtls_sender: Option<mpsc::SyncSender<Vec<u8>>>,
+    pub sctp_association: Option<SctpAssociation>,
 }
 
 impl RtcPeerConnection {
-    /// Creates an RTC connection associated with a local address and a specific role.
     pub fn new(
         local_addr: Option<&str>,
         role: PeerConnectionRole,
@@ -61,6 +61,8 @@ impl RtcPeerConnection {
         let dtls_session = DtlsSession::new(dtls_role).ok();
         let (dtls_tx, dtls_rx) = mpsc::sync_channel(100);
 
+        let sctp_association = Some(SctpAssociation::new(role == PeerConnectionRole::Controlled));
+
         Ok(Self {
             role,
             ice_agent,
@@ -74,6 +76,7 @@ impl RtcPeerConnection {
             dtls_receiver: Some(dtls_rx),
             dtls_sender: Some(dtls_tx),
             dtls_session,
+            sctp_association,
         })
     }
 
@@ -382,6 +385,27 @@ impl RtcPeerConnection {
             .map(|s| s.is_handshake_complete())
             .unwrap_or(false)
             && self.srtp_context.is_some()
+    }
+
+    /// Returns whether a DTLS session object is present.
+    pub fn has_dtls_session(&self) -> bool {
+        self.dtls_session.is_some()
+    }
+
+    /// Read decrypted data from DTLS transport.
+    pub fn dtls_read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.dtls_session
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "DTLS not connected"))?
+            .read_data(buf)
+    }
+
+    /// Write encrypted data into DTLS transport.
+    pub fn dtls_write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.dtls_session
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "DTLS not connected"))?
+            .write_data(data)
     }
 }
 

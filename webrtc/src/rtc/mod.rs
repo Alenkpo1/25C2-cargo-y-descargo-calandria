@@ -7,3 +7,4 @@ pub mod rtc_peer_connection;
 pub mod rtc_rtp;
 pub mod sdp_negotiation;
 pub mod socket;
+pub mod rtc_sctp;

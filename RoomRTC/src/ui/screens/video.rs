@@ -1,16 +1,35 @@
 use crate::client::p2p_client::P2PClient;
 use eframe::egui::load::SizedTexture;
 use eframe::egui::{
-    self, Align2, Button, Color32, ColorImage, FontId, TextureHandle, TextureOptions, Vec2, RichText
+    self, Align2, Button, Color32, ColorImage, FontId, TextureHandle, TextureOptions, Vec2, RichText,
 };
 use opencv::core::Mat;
 use opencv::prelude::*;
 use room_rtc::worker_thread::media_metrics::CallMetricsSnapshot;
 use room_rtc::worker_thread::worker_audio::WorkerAudio;
 use room_rtc::worker_thread::worker_media::VideoParams;
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::Receiver;
 use std::thread;
+use std::io::Write;
+use rfd::FileDialog;
+use room_rtc::protocols::file_transfer::FileTransferMessage;
+use std::fs::File;
+
+struct IncomingFile {
+    name: String,
+    size: usize,
+    received_bytes: usize,
+    file_handle: Option<File>,
+    path: Option<std::path::PathBuf>,
+}
+
+struct OutgoingFile {
+    name: String,
+    total_size: usize,
+    sent_bytes: usize,
+    path: std::path::PathBuf,
+}
 
 pub enum VideoMeetAction {
     GoToLobby,
@@ -32,6 +51,12 @@ pub struct VideoCall {
     audio_started: bool,
     audio_worker: Option<WorkerAudio>,
     show_stats: bool,
+    
+    // File Transfer
+    sctp_rx: Option<Receiver<(u16, Vec<u8>)>>,
+    incoming_file: Option<IncomingFile>,
+    outgoing_file: Option<OutgoingFile>,
+    pending_offer: Option<(String, usize)>, // (name, size) waiting for user decision
 }
 
 impl VideoCall {
@@ -53,6 +78,10 @@ impl VideoCall {
             audio_started: false,
             audio_worker: None,
             show_stats: false,
+            sctp_rx: None,
+            incoming_file: None,
+            outgoing_file: None,
+            pending_offer: None,
         }
     }
 
@@ -177,6 +206,148 @@ impl VideoCall {
                 }
                 
                 if let Some(client) = self.client.as_ref() {
+                    // Initialize SCTP RX
+                    if self.sctp_rx.is_none() {
+                        let (tx, rx) = mpsc::sync_channel(100);
+                        client.set_sctp_incoming(tx);
+                        self.sctp_rx = Some(rx);
+                    }
+                    
+                    // Poll SCTP Messages
+                    if let Some(rx) = &self.sctp_rx {
+                        while let Ok((stream, payload)) = rx.try_recv() {
+                            // Assume stream 1 is for file transfer control & data
+                             if stream == 1 {
+                                 // Try to parse control message (JSON)
+                                 // Or if it matches chunk prefix?
+                                 // Let's assume text messages are Control, binary are Chunks?
+                                 // My protocol says Chunks have "type":"chunk", "data":"base64".
+                                 // That is inefficient.
+                                 // Better: Control messages are JSON. Chunks are raw binary.
+                                 // But how to distinguish?
+                                 // Use separate streams? Stream 1 = Control, Stream 2 = Data.
+                                 // Let's use Stream 2 for Data.
+                                 if let Ok(msg_str) = String::from_utf8(payload.clone()) {
+                                     // Check if valid JSON
+                                     if let Ok(msg) = serde_json::from_str::<FileTransferMessage>(&msg_str) {
+                                         match msg {
+                                             FileTransferMessage::Offer { filename, size, .. } => {
+                                                 self.pending_offer = Some((filename, size));
+                                             }
+                                             FileTransferMessage::Answer { accepted } => {
+                                                 if accepted {
+                                                     // Spawn sender thread
+                                                     if let Some(out) = &self.outgoing_file {
+                                                         let path = out.path.clone();
+                                                         if let Some(client) = self.client.clone() {
+                                                             let sctp_inc = client.sctp_incoming.clone();
+                                                             thread::spawn(move || {
+                                                                 if let Ok(mut file) = std::fs::File::open(&path) {
+                                                                     let mut buffer = [0u8; 16384]; // 16KB chunks
+                                                                     use std::io::Read;
+                                                                     loop {
+                                                                         match file.read(&mut buffer) {
+                                                                             Ok(0) => break, // EOF
+                                                                             Ok(n) => {
+                                                                                 // Send Chunk (Stream 2)
+                                                                                 let _ = client.send_sctp_data(2, buffer[..n].to_vec());
+                                                                                 
+                                                                                 // Notify Local Progress (Stream 998)
+                                                                                 if let Ok(guard) = sctp_inc.lock() {
+                                                                                     if let Some(tx) = guard.as_ref() {
+                                                                                         let len_bytes = n.to_le_bytes().to_vec();
+                                                                                         let _ = tx.send((998, len_bytes));
+                                                                                     }
+                                                                                 }
+                                                                                 thread::sleep(std::time::Duration::from_millis(2));
+                                                                             }
+                                                                             Err(_) => break,
+                                                                         }
+                                                                     }
+                                                                     // Send EOF
+                                                                     let eof = FileTransferMessage::Eof;
+                                                                     if let Ok(json) = serde_json::to_string(&eof) {
+                                                                         let _ = client.send_sctp_data(1, json.into_bytes());
+                                                                     }
+                                                                 }
+                                                             });
+                                                         }
+                                                     }
+                                                 } else {
+                                                     self.outgoing_file = None;
+                                                     self.status_message = Some("File transfer rejected".to_string());
+                                                 }
+                                             }
+                                    FileTransferMessage::Ack { bytes_received: _ } => {
+                                                 // Remote ack
+                                             }
+                                             FileTransferMessage::Eof => {
+                                                 if let Some(inc) = &mut self.incoming_file {
+                                                     // Close file
+                                                     inc.file_handle = None;
+                                                     self.status_message = Some(format!("Received file: {}", inc.name));
+                                                 }
+                                                 self.incoming_file = None;
+                                             }
+                                             _ => {}
+                                         }
+                                     }
+                                 }
+                             } else if stream == 2 {
+                                 // Data Chunk
+                                 if let Some(inc) = &mut self.incoming_file {
+                                      if let Some(f) = &mut inc.file_handle {
+                                          if let Err(e) = f.write_all(&payload) {
+                                              eprintln!("File write error: {}", e);
+                                          } else {
+                                              inc.received_bytes += payload.len();
+                                          }
+                                      }
+                                 }
+                             } else if stream == 998 {
+                                 // Internal: Local Progress Update
+                                 if payload.len() >= 8 { // usize is 8 bytes on 64bit
+                                     // Actually to_le_bytes of usize depends on arch. 
+                                     // Assuming x64.
+                                     let mut arr = [0u8; 8];
+                                     if payload.len() >= 8 {
+                                        arr.copy_from_slice(&payload[..8]);
+                                        let n = usize::from_le_bytes(arr);
+                                        if let Some(out) = &mut self.outgoing_file {
+                                            out.sent_bytes += n;
+                                        }
+                                     }
+                                 }
+                             } else if stream == 999 {
+                                 // Internal: Outgoing File Selected
+                                 let path_str = String::from_utf8(payload).unwrap_or_default();
+                                 let path = std::path::PathBuf::from(&path_str);
+                                 if let Ok(metadata) = std::fs::metadata(&path) {
+                                     let size = metadata.len() as usize;
+                                     let name = path.file_name().unwrap().to_string_lossy().to_string();
+                                     
+                                     // Send Offer
+                                     let offer = FileTransferMessage::Offer {
+                                         filename: name.clone(),
+                                         size,
+                                         mime_type: "application/octet-stream".to_string(),
+                                     };
+                                    let json = serde_json::to_string(&offer).unwrap();
+                                    let _ = client.send_sctp_data(1, json.into_bytes());
+                                     
+                                     // Set Outgoing File State
+                                     self.outgoing_file = Some(OutgoingFile {
+                                         name,
+                                         total_size: size,
+                                         sent_bytes: 0,
+                                         path,
+                                     });
+                                     self.status_message = Some("Sent File Offer...".to_string());
+                                 }
+                             }
+                        }
+                    }
+
                     self.quality_metrics = client.metrics_snapshot();
                     if let Some(frame) = client.try_recv_local_frame()
                         && let Some(image) = Self::mat_to_color_image(&frame)
@@ -317,6 +488,80 @@ impl VideoCall {
             });
 
 
+            // File Offer Popup
+            if let Some((name, size)) = &self.pending_offer {
+                 let mut accepted = None;
+                 egui::Window::new("Incoming File")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                    .show(ctx, |ui| {
+                        ui.heading("Incoming File Transfer");
+                        ui.add_space(10.0);
+                        ui.label(format!("File: {}", name));
+                        ui.label(format!("Size: {:.2} MB", *size as f32 / 1024.0 / 1024.0));
+                        ui.add_space(20.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Accept").clicked() {
+                                accepted = Some(true);
+                            }
+                            if ui.button("Reject").clicked() {
+                                accepted = Some(false);
+                            }
+                        });
+                    });
+                
+                if let Some(acc) = accepted {
+                    if acc {
+                        if let Some(path) = FileDialog::new().set_file_name(name).save_file() {
+                             if let Ok(file) = File::create(&path) {
+                                 self.incoming_file = Some(IncomingFile {
+                                     name: name.clone(),
+                                     size: *size,
+                                     received_bytes: 0,
+                                     file_handle: Some(file),
+                                     path: Some(path),
+                                 });
+                                 
+                                 let ans = FileTransferMessage::Answer { accepted: true };
+                                 let json = serde_json::to_string(&ans).unwrap();
+                                 if let Some(c) = &self.client {
+                                     let _ = c.send_sctp_data(1, json.into_bytes());
+                                 }
+                             }
+                        }
+                    } else {
+                         let ans = FileTransferMessage::Answer { accepted: false };
+                         let json = serde_json::to_string(&ans).unwrap();
+                         if let Some(c) = &self.client {
+                             let _ = c.send_sctp_data(1, json.into_bytes());
+                         }
+                    }
+                    self.pending_offer = None;
+                }
+            }
+            // File Progress Overlay
+            if let Some(inc) = &self.incoming_file {
+                 egui::Area::new("incoming_progress".into())
+                    .anchor(Align2::LEFT_BOTTOM, Vec2::new(10.0, -100.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::none().fill(Color32::from_black_alpha(200)).rounding(8.0).inner_margin(8.0).show(ui, |ui| {
+                             ui.label(RichText::new(format!("Receiving: {} ({:.1}%)", inc.name, (inc.received_bytes as f32 / inc.size as f32) * 100.0)).color(Color32::WHITE));
+                             ui.add(egui::ProgressBar::new(inc.received_bytes as f32 / inc.size as f32).animate(true));
+                        });
+                    });
+            }
+            if let Some(out) = &self.outgoing_file {
+                 egui::Area::new("outgoing_progress".into())
+                    .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-10.0, -100.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::none().fill(Color32::from_black_alpha(200)).rounding(8.0).inner_margin(8.0).show(ui, |ui| {
+                             ui.label(RichText::new(format!("Sending: {} ({:.1}%)", out.name, (out.sent_bytes as f32 / out.total_size as f32) * 100.0)).color(Color32::WHITE));
+                             ui.add(egui::ProgressBar::new(out.sent_bytes as f32 / out.total_size as f32).animate(true));
+                        });
+                    });
+            }
+
             // Floating Control Bar (Bottom)
             egui::Area::new("control_bar".into())
                 .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -20.0))
@@ -371,6 +616,31 @@ impl VideoCall {
                                     self.show_stats = !self.show_stats;
                                 }
 
+                                ui.add_space(20.0);
+                                
+                                // File Send Button
+                                let file_btn = Button::new(RichText::new("📎").size(24.0))
+                                    .fill(crate::ui::theme::colors::BACKGROUND)
+                                    .rounding(30.0)
+                                    .min_size(Vec2::new(50.0, 50.0));
+                                if ui.add(file_btn).on_hover_text("Send File").clicked() {
+                                     // Spawn file picker thread
+                                     if let Some(client) = self.client.clone() {
+                                         let sctp_inc = client.sctp_incoming.clone();
+                                         thread::spawn(move || {
+                                            if let Some(path) = FileDialog::new().pick_file() {
+                                                let path_str = path.to_string_lossy().to_string();
+                                                if let Ok(guard) = sctp_inc.lock() {
+                                                    if let Some(tx) = guard.as_ref() {
+                                                        // Use stream 999 for internal path passing
+                                                        let _ = tx.send((999, path_str.into_bytes()));
+                                                    }
+                                                }
+                                            }
+                                         });
+                                     }
+                                }
+                                
                                 ui.add_space(20.0);
 
                                 // Hangup Button

@@ -24,6 +24,21 @@ pub struct P2PClient {
     media_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
     audio_incoming: Arc<Mutex<Option<SyncSender<Vec<u8>>>>>,
     media_metrics: Option<Arc<Mutex<MediaMetrics>>>,
+    pub sctp_incoming: Arc<Mutex<Option<SyncSender<(u16, Vec<u8>)>>>>,
+}
+
+impl Clone for P2PClient {
+    fn clone(&self) -> Self {
+        Self {
+            peer_connection: Arc::clone(&self.peer_connection),
+            listener_handle: None,
+            media_worker: None,
+            media_incoming: Arc::clone(&self.media_incoming),
+            audio_incoming: Arc::clone(&self.audio_incoming),
+            media_metrics: self.media_metrics.clone(),
+            sctp_incoming: Arc::clone(&self.sctp_incoming),
+        }
+    }
 }
 
 impl P2PClient {
@@ -37,6 +52,7 @@ impl P2PClient {
             media_incoming: Arc::new(Mutex::new(None)),
             audio_incoming: Arc::new(Mutex::new(None)),
             media_metrics: None,
+            sctp_incoming: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -67,6 +83,7 @@ impl P2PClient {
     /// Inicia el proceso de conexión ICE y DTLS en un hilo de fondo.
     pub fn establish_connection(&mut self) -> Result<(), PeerConnectionError> {
         let pc_clone = Arc::clone(&self.peer_connection);
+        let sctp_extension = Arc::clone(&self.sctp_incoming);
 
         // Asegurarse de que el listener esté iniciado antes de empezar
         pc_clone.lock().unwrap().ensure_listener_started()?;
@@ -102,8 +119,79 @@ impl P2PClient {
                 }
                 Err(e) => {
                     eprintln!("Connection Thread: DTLS handshake failed: {}", e);
+                    return;
                 }
             }
+
+            // 4. Iniciar SCTP Association
+            {
+               let mut pc = pc_clone.lock().unwrap();
+               // Determine if client (Controlling -> Client).
+               let callback_role = pc.role(); 
+               if let Some(sctp) = &mut pc.sctp_association {
+                   // Controlling node initiates Connect
+                   // Both sides call establish; initiator will send INIT.
+                   if matches!(callback_role, PeerConnectionRole::Controlling) {
+                        sctp.establish();
+                   } else {
+                        sctp.establish();
+                   }
+               }
+            }
+
+            // 5. Start SCTP Pump Loop
+            println!("Connection Thread: Entering SCTP Pump Loop...");
+            loop {
+                thread::sleep(Duration::from_millis(1));
+                
+                let mut pc = pc_clone.lock().unwrap();
+                if pc.sctp_association.is_none() || !pc.has_dtls_session() {
+                    break;
+                }
+
+                // A. Read from DTLS -> Feed SCTP
+                let mut buf = [0u8; 2048];
+                match pc.dtls_read(&mut buf) {
+                     Ok(n) => {
+                         let data = &buf[..n];
+                         pc.sctp_association.as_mut().unwrap().handle_input(data);
+                     }
+                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                         // No data, continue
+                     }
+                     Err(_) => {
+                         // DTLS error
+                     }
+                }
+
+                // B. Poll SCTP Output -> Write DTLS
+                if pc.sctp_association.is_some() {
+                    let mut outbound: Vec<Vec<u8>> = Vec::new();
+                    let mut incoming: Vec<(u16, Vec<u8>)> = Vec::new();
+                    {
+                        let sctp = pc.sctp_association.as_mut().unwrap();
+                        while let Some(out_packet) = sctp.poll_output() {
+                            outbound.push(out_packet);
+                        }
+                        while let Some(pkt) = sctp.recv_data() {
+                            incoming.push(pkt);
+                        }
+                    }
+
+                    for out_packet in outbound {
+                        let _ = pc.dtls_write(&out_packet);
+                    }
+
+                    for (stream, payload) in incoming {
+                        if let Ok(guard) = sctp_extension.lock() {
+                            if let Some(tx) = guard.as_ref() {
+                                let _ = tx.send((stream, payload));
+                            }
+                        }
+                    }
+                }
+            }
+            println!("Connection Thread: SCTP Pump Loop exited.");
         });
 
         Ok(())
@@ -307,5 +395,30 @@ impl P2PClient {
         self.media_metrics
             .as_ref()
             .and_then(|metrics| metrics.lock().ok().map(|m| m.snapshot()))
+    }
+    
+    pub fn send_sctp_data(&self, stream: u16, payload: Vec<u8>) -> Result<(), String> {
+        let mut pc = self.peer_connection.lock().unwrap();
+        if let Some(sctp) = &mut pc.sctp_association {
+            sctp.send_data(stream, payload)?;
+            
+            // Trigger write immediately if possible
+            let mut outbound: Vec<Vec<u8>> = Vec::new();
+            while let Some(out) = sctp.poll_output() {
+                outbound.push(out);
+            }
+            for out in outbound {
+                let _ = pc.dtls_write(&out);
+            }
+            Ok(())
+        } else {
+            Err("SCTP not initialized".to_string())
+        }
+    }
+    
+    pub fn set_sctp_incoming(&self, sender: SyncSender<(u16, Vec<u8>)>) {
+          if let Ok(mut guard) = self.sctp_incoming.lock() {
+               *guard = Some(sender);
+          }
     }
 }

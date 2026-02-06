@@ -7,12 +7,14 @@ default-run = "roomrtc"
 [dependencies]
 eframe = "0.29"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 room_rtc = { path = "../webrtc", package = "room-rtc" }
 opencv = "0.96"
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 rcgen = "0.11"
 base64 = "0.21"
 rand = "0.8"
+rfd = "0.14"
 
 [[bin]]
 name = "roomrtc"

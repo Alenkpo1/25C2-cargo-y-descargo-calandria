@@ -60,9 +60,8 @@ impl Read for UdpStream {
             return Ok(n);
         }
 
-        // 2. Si no hay datos, esperamos el siguiente paquete del canal.
-        // Usamos recv_timeout para no bloquear eternamente y permitir que OpenSSL maneje retransmisiones.
-        match self.receiver.recv_timeout(Duration::from_millis(100)) {
+        // 2. Si no hay datos, intentamos recibir del canal sin bloquear.
+        match self.receiver.try_recv() {
             Ok(packet) => {
                 println!("DEBUG: UdpStream READ packet of {} bytes", packet.len());
                 let n = cmp::min(packet.len(), buf.len());
@@ -76,13 +75,12 @@ impl Read for UdpStream {
 
                 Ok(n)
             }
-            Err(RecvTimeoutError::Timeout) => {
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
                 // Retornamos WouldBlock para que OpenSSL sepa que no hay datos por ahora
-                // y pueda verificar sus timers internos para retransmisión.
-                Err(io::Error::new(io::ErrorKind::WouldBlock, "Timeout waiting for packet"))
+                Err(io::Error::new(io::ErrorKind::WouldBlock, "No packet in channel"))
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                // El canal se cerró (el PeerConnection murió o se desconectó)
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                // El canal se cerró
                 println!("DEBUG: UdpStream Channel CLOSED (sender dropped)");
                 Err(io::Error::new(
                     io::ErrorKind::BrokenPipe,
@@ -282,6 +280,22 @@ impl DtlsSession {
                 Ok(buf)
             }
             None => Err("Handshake not complete".to_string()),
+        }
+    }
+
+    pub fn write_data(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
+        if let Some(stream) = &mut self.ssl_stream {
+            stream.write(data)
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "DTLS not connected"))
+        }
+    }
+
+    pub fn read_data(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
+        if let Some(stream) = &mut self.ssl_stream {
+            stream.read(buf)
+        } else {
+             Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "DTLS not connected"))
         }
     }
 }

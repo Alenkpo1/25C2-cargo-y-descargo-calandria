@@ -104,7 +104,21 @@ impl SctpAssociation {
                     .map_err(|e| e.to_string())?,
             };
 
-            stream.write(&payload).map_err(|e| e.to_string())?;
+            let mut offset = 0;
+            while offset < payload.len() {
+                match stream.write(&payload[offset..]) {
+                    Ok(n) => {
+                        offset += n;
+                        if n == 0 {
+                            return Err("SCTP stream write returned 0 bytes (buffer full?)".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        println!("DEBUG: SCTP send error on stream {}: {:?}", stream_id, e);
+                        return Err(e.to_string());
+                    }
+                }
+            }
         }
 
         self.pump_association(Instant::now());

@@ -333,7 +333,11 @@ impl VideoCall {
                                          mime_type: "application/octet-stream".to_string(),
                                      };
                                     let json = serde_json::to_string(&offer).unwrap();
-                                    let _ = client.send_sctp_data(1, json.into_bytes());
+                                    if let Err(e) = client.send_sctp_data(1, json.into_bytes()) {
+                                        eprintln!("Error sending File Offer: {}", e);
+                                        self.status_message = Some(format!("Error sending offer: {}", e));
+                                        return None;
+                                    }
                                      
                                      // Set Outgoing File State
                                      self.outgoing_file = Some(OutgoingFile {
@@ -454,7 +458,8 @@ impl VideoCall {
             let video_area_height = available_rect.height() - control_bar_height;
             
             // Allocate space for videos
-            ui.allocate_ui_at_rect(egui::Rect::from_min_size(available_rect.min, egui::vec2(available_rect.width(), video_area_height)), |ui| {
+            let video_rect = egui::Rect::from_min_size(available_rect.min, egui::vec2(available_rect.width(), video_area_height));
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(video_rect), |ui| {
                 ui.centered_and_justified(|ui| {
                     if self.client.is_some() && self.media_started {
                         // Remote Video (Primary)
@@ -789,6 +794,13 @@ impl VideoCall {
         self.media_started = false;
         self.local_texture = None;
         self.remote_texture = None;
+        self.reset_file_transfer_state();
+    }
+
+    fn reset_file_transfer_state(&mut self) {
+        self.incoming_file = None;
+        self.outgoing_file = None;
+        self.pending_offer = None;
     }
 
     fn send_hangup_signal(client: &P2PClient) {

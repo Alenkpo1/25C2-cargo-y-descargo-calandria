@@ -53,9 +53,6 @@ impl Iterator for ChannelSource {
                         self.position = 0;
                     },
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
-                         if rand::random::<u8>() < 2 { // very low probability
-                             eprintln!("[PLAYBACK-RODIO] Buffer empty");
-                         }
                          return Some(0);
                     },
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {

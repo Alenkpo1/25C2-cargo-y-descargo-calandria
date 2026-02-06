@@ -1,6 +1,6 @@
 use sctp_proto::{
     Association, AssociationHandle, ClientConfig, DatagramEvent, Endpoint, EndpointConfig,
-    Payload, PayloadProtocolIdentifier, ServerConfig, Transmit,
+    Payload, PayloadProtocolIdentifier, ServerConfig, Transmit, TransportConfig,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -24,8 +24,10 @@ impl SctpAssociation {
 
         let server_config = is_server.then(|| {
             let mut sc = ServerConfig::default();
-            sc.transport.max_inbound_streams = 16;
-            sc.transport.max_initial_outgoing_streams = 16;
+            let mut tc = TransportConfig::default();
+            tc.max_inbound_streams = 16;
+            tc.max_initial_outgoing_streams = 16;
+            sc.transport = Arc::new(tc);
             Arc::new(sc)
         });
 
@@ -45,8 +47,10 @@ impl SctpAssociation {
         if !self.is_server {
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
             let mut client_config = ClientConfig::default();
-            client_config.transport.max_inbound_streams = 16;
-            client_config.transport.max_initial_outgoing_streams = 16;
+            let mut tc = TransportConfig::default();
+            tc.max_inbound_streams = 16;
+            tc.max_initial_outgoing_streams = 16;
+            client_config.transport = Arc::new(tc);
 
             if let Ok((handle, association)) = self.endpoint.connect(client_config, addr) {
                 self.association_handle = Some(handle);

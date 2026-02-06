@@ -42,6 +42,18 @@ impl Clone for P2PClient {
 }
 
 impl P2PClient {
+    fn write_dtls_with_retry(pc: &mut RtcPeerConnection, data: &[u8]) {
+        for _ in 0..200 {
+            match pc.dtls_write(data) {
+                Ok(_) => return,
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                }
+                Err(_) => return, // drop on other errors
+            }
+        }
+    }
     pub fn new(role: PeerConnectionRole) -> Result<Self, PeerConnectionError> {
         let peer_connection = Arc::new(Mutex::new(RtcPeerConnection::new(None, role)?));
 
@@ -179,7 +191,7 @@ impl P2PClient {
                     }
 
                     for out_packet in outbound {
-                        let _ = pc.dtls_write(&out_packet);
+                        Self::write_dtls_with_retry(&mut pc, &out_packet);
                     }
 
                     for (stream, payload) in incoming {
@@ -408,7 +420,7 @@ impl P2PClient {
                 outbound.push(out);
             }
             for out in outbound {
-                let _ = pc.dtls_write(&out);
+                Self::write_dtls_with_retry(&mut pc, &out);
             }
             Ok(())
         } else {

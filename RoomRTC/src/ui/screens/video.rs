@@ -271,14 +271,14 @@ impl VideoCall {
                                                                                     total_sent += n;
                                                                                     break;
                                                                                 }
-                                                                                Err(e) if e.contains("BufferFull") => {
-                                                                                    retries += 1;
-                                                                                    if retries > 200 { // 10 seconds (50ms * 200)
-                                                                                        eprintln!("DEBUG: Upload error: BufferFull timeout after {} bytes", total_sent);
-                                                                                        break;
-                                                                                    }
-                                                                                    thread::sleep(std::time::Duration::from_millis(50));
-                                                                                }
+                                        Err(e) if e.contains("BufferFull") => {
+                                            retries += 1;
+                                            if retries > 4000 { // wait up to ~3.3 minutes at 50ms
+                                                eprintln!("DEBUG: Upload error: BufferFull timeout after {} bytes", total_sent);
+                                                break;
+                                            }
+                                            thread::sleep(std::time::Duration::from_millis(50));
+                                        }
                                                                                 Err(e) => {
                                                                                     eprintln!("DEBUG: Upload error: {}", e);
                                                                                     break;

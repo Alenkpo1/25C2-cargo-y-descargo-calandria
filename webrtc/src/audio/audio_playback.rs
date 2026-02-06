@@ -49,7 +49,6 @@ impl Iterator for ChannelSource {
                 // Try to receive without blocking
                 match guard.try_recv() {
                     Ok(new_samples) => {
-                        eprintln!("[PLAYBACK-RODIO] Got {} samples", new_samples.len());
                         self.current_buffer = new_samples;
                         self.position = 0;
                     },

@@ -203,21 +203,42 @@ impl SctpAssociation {
             for event in pending_events {
                  use sctp_proto::Event;
                  use sctp_proto::StreamEvent;
+                 
+                 // Debug Log
+                 println!("DEBUG: SCTP Event: {:?}", event);
+                 
                  match event {
                     Event::Stream(StreamEvent::Readable { id }) => {
                         // We need to borrow assoc again to read.
                         // This is fine as we are in the main loop scope, not inside the if-let.
                         if let Some(assoc) = self.association.as_mut() {
                              if let Ok(mut stream) = assoc.stream(id) {
-                                  if let Ok(Some(chunks)) = stream.read() {
-                                      let mut buf = vec![0u8; chunks.len()];
-                                      if let Ok(_) = chunks.read(&mut buf) {
-                                          self.incoming_data.push_back((id, buf));
+                                  // Read all available chunks
+                                  loop {
+                                      match stream.read() {
+                                          Ok(Some(chunks)) => {
+                                              let mut buf = vec![0u8; chunks.len()];
+                                              if let Ok(_) = chunks.read(&mut buf) {
+                                                  println!("DEBUG: Read {} bytes from Stream {}", buf.len(), id);
+                                                  self.incoming_data.push_back((id, buf));
+                                              }
+                                          }
+                                          Ok(None) => break, 
+                                          Err(e) => {
+                                              println!("DEBUG: Stream read error: {:?}", e);
+                                              break;
+                                          }
+                                      }
+                                      if !stream.is_readable() {
+                                          break;
                                       }
                                   }
                              }
                         }
                         progressed = true;
+                    }
+                    Event::Stream(StreamEvent::Writable { id }) => {
+                         println!("DEBUG: Stream {} is writable", id);
                     }
                     Event::AssociationLost { reason } => {
                         println!("DEBUG: SCTP Association Lost: {:?}", reason);

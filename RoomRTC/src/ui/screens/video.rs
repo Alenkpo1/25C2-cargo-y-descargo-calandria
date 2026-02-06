@@ -243,6 +243,7 @@ impl VideoCall {
                                                              let sctp_inc = client.sctp_incoming.clone();
                                                              thread::spawn(move || {
                                                                  if let Ok(mut file) = std::fs::File::open(&path) {
+                                                                    use std::io::Read;
                                                                     let mut buffer = [0u8; 4096]; // 4KB chunks (Reduced from 16KB to improve reliability)
                                                                     let mut total_sent = 0;
                                                                     loop {

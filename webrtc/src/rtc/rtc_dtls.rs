@@ -2,14 +2,13 @@ use openssl::asn1::Asn1Time;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
-use openssl::ssl::{Ssl, SslContext, SslMethod, SslStream, SslVerifyMode, ErrorCode, HandshakeError};
+use openssl::ssl::{Ssl, SslContext, SslMethod, SslStream, SslVerifyMode, HandshakeError};
 use openssl::x509::{X509NameBuilder, X509};
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver};
 use std::cmp;
-use std::time::Duration;
 
 /// Stream que conecta OpenSSL con el mundo UDP a través de un Channel.
 /// - Escritura: Directa al UdpSocket.

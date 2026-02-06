@@ -137,28 +137,85 @@ impl SctpAssociation {
     fn pump_association(&mut self, now: Instant) {
         loop {
             let mut progressed = false;
+            let mut pending_transmits: Vec<Transmit> = Vec::new();
+            let mut pending_events: Vec<sctp_proto::Event> = Vec::new();
+            let mut endpoint_events: Vec<(AssociationHandle, sctp_proto::EndpointEvent)> = Vec::new();
 
+            // Scope for mutable borrow of self.association
             if let Some(assoc) = self.association.as_mut() {
+                // Poll for anything that needs to go to the Endpoint
                 while let Some(ep_event) = assoc.poll_endpoint_event() {
+                    // We can't access self.endpoint here if assoc is borrowed?
+                    // assoc borrows self.association. self.endpoint is distinct.
+                    // However, we need self.association_handle too.
+                    // To be safe, let's collect these too, or handle them if disjoint.
+                    // Compiler is smart enough for disjoint fields:
+                    // self.association (mut), self.endpoint (mut), self.association_handle (immut)
+                    // This block MIGHT be fine if fields are disjoint.
+                    // But let's verify. Polling assoc.poll_endpoint_event() is fine.
+                    // self.endpoint.handle_event() takes &mut Endpoint.
+                    // So fine.
+                    // But to be absolutely safe and consistent with other parts, let's try to handle inline 
+                    // if compiler allows disjoint borrows, OR collect.
+                    // The Error report didn't complain about endpoint interaction, only take_transmit and self.association=None.
+                    // So endpoint interaction might be fine.
+                    // Let's keep endpoint interaction inline but collect transmits/events.
                     if let Some(handle) = self.association_handle {
-                        if let Some(back) = self.endpoint.handle_event(handle, ep_event) {
-                            assoc.handle_event(back);
-                            progressed = true;
-                        }
+                         if let Some(back) = self.endpoint.handle_event(handle, ep_event) {
+                             assoc.handle_event(back);
+                             progressed = true;
+                         }
                     }
                 }
 
-                let mut pending: Vec<Transmit> = Vec::new();
                 while let Some(tx) = assoc.poll_transmit(now) {
-                    pending.push(tx);
+                    pending_transmits.push(tx);
                 }
 
-                for tx in pending {
-                    if let Some(first) = self.take_transmit(tx) {
-                        self.outgoing_queue.push_front(first);
-                    }
-                    progressed = true;
+                while let Some(event) = assoc.poll() {
+                    pending_events.push(event);
                 }
+            } // assoc borrow ends
+
+            // Process collected Transmits
+            for tx in pending_transmits {
+                if let Some(first) = self.take_transmit(tx) {
+                     self.outgoing_queue.push_front(first);
+                }
+                progressed = true;
+            }
+
+            // Process collected Events
+            for event in pending_events {
+                 use sctp_proto::Event;
+                 use sctp_proto::StreamEvent;
+                 match event {
+                    Event::Stream(StreamEvent::Readable { id }) => {
+                        // We need to borrow assoc again to read.
+                        // This is fine as we are in the main loop scope, not inside the if-let.
+                        if let Some(assoc) = self.association.as_mut() {
+                             if let Ok(mut stream) = assoc.stream(id) {
+                                  if let Ok(Some(chunks)) = stream.read() {
+                                      let mut buf = vec![0u8; chunks.len()];
+                                      if let Ok(_) = chunks.read(&mut buf) {
+                                          self.incoming_data.push_back((id, buf));
+                                      }
+                                  }
+                             }
+                        }
+                        progressed = true;
+                    }
+                    Event::AssociationLost { reason } => {
+                        println!("DEBUG: SCTP Association Lost: {:?}", reason);
+                        self.association = None;
+                        progressed = true;
+                    }
+                    Event::Connected => {
+                        println!("DEBUG: SCTP Connected");
+                        progressed = true;
+                    }
+                    _ => {}
+                 }
             }
 
             if !progressed {

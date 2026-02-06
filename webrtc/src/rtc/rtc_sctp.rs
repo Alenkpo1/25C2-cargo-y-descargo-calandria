@@ -198,6 +198,14 @@ impl SctpAssociation {
                 while let Some(event) = assoc.poll() {
                     pending_events.push(event);
                 }
+
+                // Drive timeouts to keep SACK/RTT/retransmisiones vivas.
+                if let Some(deadline) = assoc.poll_timeout() {
+                    if deadline <= now {
+                        assoc.handle_timeout(now);
+                        progressed = true;
+                    }
+                }
             } // assoc borrow ends
 
             // Process collected Transmits

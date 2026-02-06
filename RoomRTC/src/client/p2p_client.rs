@@ -43,14 +43,16 @@ impl Clone for P2PClient {
 
 impl P2PClient {
     fn write_dtls_with_retry(pc: &mut RtcPeerConnection, data: &[u8]) {
-        for _ in 0..200 {
+        let mut backoff_ms = 2u64;
+        loop {
             match pc.dtls_write(data) {
                 Ok(_) => return,
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                    backoff_ms = (backoff_ms * 2).min(200); // cap backoff
                     continue;
                 }
-                Err(_) => return, // drop on other errors
+                Err(_) => return, // drop on other errors (e.g., connection closed)
             }
         }
     }
